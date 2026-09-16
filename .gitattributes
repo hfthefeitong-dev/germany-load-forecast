@@ -1,0 +1,8 @@
+# 代码在 WSL 里跑，统一 LF。CRLF 会让 shell 脚本报 "bad interpreter: /bin/bash^M"
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.pt binary
+*.safetensors binary

@@ -1,0 +1,36 @@
+# 数据与模型产物
+data/
+datasets/
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.npy
+*.npz
+*.parquet
+*.jsonl
+*.csv.gz
+wandb/
+runs/
+outputs/
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.ruff_cache/
+.mypy_cache/
+
+# 编辑器 / 系统
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
