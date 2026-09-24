@@ -1,0 +1,28 @@
+[project]
+name = "loadfc"
+version = "0.1.0"
+description = "Day-ahead electricity load forecasting for Germany, benchmarked against the official TSO forecast"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow",
+    "numpy",
+    "lightgbm>=4",
+    "matplotlib",
+    "requests",
+    "holidays",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
