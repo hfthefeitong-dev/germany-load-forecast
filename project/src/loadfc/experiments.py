@@ -193,6 +193,7 @@ def bias_correction() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
             test_rows.append({
                 "window": name, "model": col, "test MAPE %": _mape(allp[col], y),
                 "months beating official": int((mon[col] < mon["official"]).sum()),
+                "months beating official+bc": int((mon[col] < mon["official+bc"]).sum()),
                 "months": len(mon),
             })
         for a, b in [("ensemble+bc", "ensemble"), ("ensemble+bc", "official+bc"), ("official+bc", "official")]:

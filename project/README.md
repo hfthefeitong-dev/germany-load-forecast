@@ -1,6 +1,6 @@
 # Beating Germany's official day-ahead load forecast, with less information
 
-Day-ahead forecasts of electricity demand for Germany, benchmarked against the official forecast that the four transmission system operators (TSOs) publish every day. The models use **strictly less information** than the official forecaster. An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast and beats it in every one of 21 test months**, across two separate out-of-sample periods. Forecast errors are then translated into **imbalance costs in euros** using the German imbalance price reBAP.
+Day-ahead forecasts of electricity demand for Germany, benchmarked against the official forecast that the four transmission system operators (TSOs) publish every day. The models use **strictly less information** than the official forecaster. An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast and beats it in every one of 21 test months**, across two separate out-of-sample periods. Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the advantage is **22 % in the main period** but only **7 % and not significant in the backtest** (see [below](#a-stronger-benchmark-the-official-forecast-after-bias-correction)). Forecast errors are then translated into **imbalance costs in euros** using the German imbalance price reBAP.
 
 | MAPE | Main test: Oct 2025 – Sep 2026 | Backtest: Jan – Sep 2025 |
 |---|---|---|
@@ -10,8 +10,11 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 | Chronos-2, zero-shot foundation model | 3.01 % | 2.46 % |
 | **Ensemble: LightGBM + Chronos-2** | **2.69 %** | **2.59 %** |
 | Months in which the ensemble beats the official forecast | 12 of 12 | 9 of 9 |
+| *Stronger benchmark: official forecast + bias correction* | *3.43 %* | *2.87 %* |
+| *Ensemble + bias correction* | *2.67 %* | *2.66 %* |
+| *Months in which it beats the corrected official forecast* | *12 of 12, October a near tie* | *6 of 9* |
 
-Ensemble vs official: Diebold-Mariano p < 0.001 in both periods. Full tables: [`reports/RESULTS.md`](reports/RESULTS.md).
+Ensemble vs official: Diebold-Mariano p < 0.001 in both periods. Corrected ensemble vs corrected official: p < 0.001 in the main period, p = 0.20 in the backtest. Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md).
 
 ---
 
@@ -101,6 +104,24 @@ All sources are free and need no registration. History starts in January 2024, w
 
 Public holidays remain the weak spot: in the backtest the ensemble's holiday error (6.0 %) is worse than the official forecast's (5.0 %).
 
+### A stronger benchmark: the official forecast after bias correction
+
+The official forecast's errors are not random: they drift in one direction for weeks, e.g. +2 GW on average in April and May. Such persistent bias can be removed with a few lines of code, so beating the *raw* official forecast partly means beating a fixable bias.
+
+The correction subtracts a share `alpha` of the forecast's mean error over the last `window_days` days, per hour of the day, using only errors known at forecast time (up to day D-2). The parameters are chosen on the validation periods, separately for every forecast, and then frozen ([`experiments.py`](src/loadfc/experiments.py), with its own leakage test).
+
+| MAPE | Main | Backtest |
+|---|---|---|
+| Official forecast | 3.84 % | 3.83 % |
+| Official forecast + bias correction | 3.43 % | 2.87 % |
+| Ensemble | 2.69 % | 2.59 % |
+| Ensemble + bias correction | 2.67 % | 2.66 % |
+
+- **The correction helps the official forecast a lot and our models hardly at all.** Our models already adapt to the load level through their lagged features; the official forecast does not.
+- **Against the corrected official forecast, the main-period result holds** (22 % lower error, 12 of 12 months with October a near tie, p < 0.001). **The backtest result does not**: the gap shrinks to 7 %, the ensemble wins only 6 of 9 months, and the difference is not significant (p = 0.20).
+
+The honest summary: the models are clearly better than the official forecast *as published*, and clearly better than a corrected version when they have enough training history.
+
 ### What drives LightGBM's improvement? (ablation, main period)
 
 | MAPE [%] | All hours | Sunny off-day middays | Public holidays |
@@ -147,6 +168,7 @@ This is a thought experiment, not a market simulation: if every BRP forecast bet
 ## Limitations
 
 - **21 test months in two periods.** More than one year, but the periods are consecutive and share most of their weather regime.
+- **The size of the advantage depends on the benchmark.** About 30 % against the published official forecast, 7 to 22 % against a bias-corrected version.
 - **Public holidays** are still forecast worse than the official forecast when training history is short.
 - **Weather is represented by one city per state.** Weighting radiation by installed PV capacity (from the Marktstammdatenregister) would model behind-the-meter PV more directly.
 - **Actual load values may be revised** after first publication. The lag features use final values, which a real-time forecaster would only have in provisional form.
