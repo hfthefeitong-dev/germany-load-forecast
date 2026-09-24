@@ -12,9 +12,12 @@ dependencies = [
     "requests",
     "holidays",
     "scipy",
+    "tabulate",  # markdown tables in reports/RESULTS.md
 ]
 
 [project.optional-dependencies]
+# Chronos-2 needs PyTorch and, in practice, a CUDA GPU.
+foundation = ["chronos-forecasting>=2.0"]
 dev = ["pytest"]
 
 [build-system]

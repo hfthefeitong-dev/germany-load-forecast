@@ -10,7 +10,15 @@ import pandas as pd
 from . import config
 from .features import TARGET
 
-COLORS = {"actual": "#222222", "naive_weekly": "#9e9e9e", "official": "#d95f02", "lgbm": "#1b9e77", "chronos_uni": "#b2abd2", "chronos_cov": "#7570b3"}
+COLORS = {
+    "actual": "#222222",
+    "naive_weekly": "#9e9e9e",
+    "official": "#d95f02",
+    "lgbm": "#1b9e77",
+    "chronos_uni": "#b2abd2",
+    "chronos_cov": "#7570b3",
+    "ensemble": "#e7298a",
+}
 LABELS = {
     "naive_weekly": "Naive (same hour last week)",
     "official": "Official TSO forecast",
@@ -19,13 +27,33 @@ LABELS = {
     "chronos_cov": "Chronos-2, with covariates",
     "ensemble": "Ensemble (LightGBM + Chronos-2)",
 }
-COLORS["ensemble"] = "#e7298a"
 
 
 def _save(fig, name):
     fig.tight_layout()
     fig.savefig(config.FIGURES / name, dpi=130)
     plt.close(fig)
+
+
+def monthly_mape(tables: dict[str, pd.DataFrame]) -> None:
+    """Month-by-month MAPE across all evaluation windows, in time order."""
+    frames = []
+    for name, t in tables.items():
+        t = t.copy()
+        t["window"] = name
+        frames.append(t)
+    both = pd.concat(frames).sort_index()
+    x = pd.to_datetime(both.index)
+    fig, ax = plt.subplots(figsize=(11, 4))
+    for col in ["official", "lgbm", "chronos_cov", "ensemble"]:
+        ax.plot(x, both[col], marker="o", ms=4, lw=1.6, color=COLORS[col], label=LABELS[col])
+    for name, t in tables.items():
+        start = pd.to_datetime(t.index.min())
+        ax.axvline(start, color="#bbb", lw=1, ls=":")
+        ax.text(start, ax.get_ylim()[1], f" test window: {name}", va="top", fontsize=8, color="#666")
+    ax.set(ylabel="MAPE [%]", title="Month-by-month error in both test windows")
+    ax.legend(fontsize=8, loc="upper right")
+    _save(fig, "07_monthly_mape.png")
 
 
 def load_patterns(df: pd.DataFrame) -> None:

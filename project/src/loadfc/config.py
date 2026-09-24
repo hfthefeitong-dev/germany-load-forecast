@@ -23,13 +23,34 @@ TZ = "Europe/Berlin"
 # (Open-Meteo Previous Runs API), so that is where usable history begins.
 HISTORY_START = pd.Timestamp("2024-01-21", tz=TZ)
 
-# Everything from TEST_START onwards is out-of-sample. Hyperparameters are
-# chosen on data *before* this date only.
-TEST_START = pd.Timestamp("2025-10-01", tz=TZ)
 
-# Validation window used once, before the test period, to pick the number
-# of boosting rounds.
-VALID_START = pd.Timestamp("2025-07-01", tz=TZ)
+# --------------------------------------------------------- evaluation windows
+@dataclass(frozen=True)
+class Window:
+    """One out-of-sample experiment.
+
+    Every choice (number of boosting rounds, Chronos-2 context length) is
+    made on [valid_start, test_start) and then frozen before the test period
+    [test_start, test_end) is touched.
+    """
+
+    name: str
+    valid_start: pd.Timestamp
+    test_start: pd.Timestamp
+    test_end: pd.Timestamp | None  # exclusive; None = up to the latest data
+
+
+def _ts(s: str) -> pd.Timestamp:
+    return pd.Timestamp(s, tz=TZ)
+
+
+WINDOWS: dict[str, Window] = {
+    # The headline experiment: the most recent 12 months.
+    "main": Window("main", _ts("2025-07-01"), _ts("2025-10-01"), None),
+    # A second, earlier test period with its own validation window, to check
+    # that the result is not specific to one year. Less training data here.
+    "backtest": Window("backtest", _ts("2024-10-01"), _ts("2025-01-01"), _ts("2025-10-01")),
+}
 
 
 # -------------------------------------------------------------------- states

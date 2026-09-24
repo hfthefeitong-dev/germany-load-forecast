@@ -41,14 +41,15 @@ def _trainable(df: pd.DataFrame) -> pd.DataFrame:
     return df[df[TARGET].notna() & df["load_lag336"].notna()]
 
 
-def choose_rounds(df: pd.DataFrame, max_rounds: int = 5000) -> tuple[int, float]:
-    """Pick the number of boosting rounds on a validation window *before* the test set.
+def choose_rounds(df: pd.DataFrame, w: config.Window, max_rounds: int = 5000) -> tuple[int, float]:
+    """Pick the number of boosting rounds on the window's validation period.
 
-    Returns (best_rounds, validation MAPE in %).
+    Training data ends one day before the validation period starts, for the
+    same reason as in `rolling_lgbm`. Returns (best_rounds, validation MAPE %).
     """
     loc = _local(df)
-    train = _trainable(df[(loc >= config.HISTORY_START) & (loc < config.VALID_START - pd.Timedelta(days=1))])
-    valid = _trainable(df[(loc >= config.VALID_START) & (loc < config.TEST_START)])
+    train = _trainable(df[(loc >= config.HISTORY_START) & (loc < w.valid_start - pd.Timedelta(days=1))])
+    valid = _trainable(df[(loc >= w.valid_start) & (loc < w.test_start)])
 
     model = lgb.train(
         PARAMS,
@@ -63,16 +64,18 @@ def choose_rounds(df: pd.DataFrame, max_rounds: int = 5000) -> tuple[int, float]
 
 
 def rolling_lgbm(
-    df: pd.DataFrame, rounds: int, feature_list: list[str] | None = None
+    df: pd.DataFrame, rounds: int, w: config.Window, feature_list: list[str] | None = None
 ) -> tuple[pd.Series, lgb.Booster]:
-    """Monthly expanding-window retraining over the test period.
+    """Monthly expanding-window retraining over the window's test period.
 
     `feature_list` defaults to all features; the ablation study passes subsets.
     """
     feats = feature_list or FEATURES
     loc = _local(df)
     last = loc[df[TARGET].notna()].max()
-    months = pd.date_range(config.TEST_START, last, freq="MS")
+    if w.test_end is not None:
+        last = min(last, w.test_end - pd.Timedelta(hours=1))
+    months = pd.date_range(w.test_start, last, freq="MS")
 
     preds = []
     model = None
