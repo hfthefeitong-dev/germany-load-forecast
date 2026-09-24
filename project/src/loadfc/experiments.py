@@ -201,3 +201,79 @@ def bias_correction() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
             test_rows.append({"window": name, "model": f"DM {a} vs {b}",
                               "test MAPE %": None, "DM_stat": dm["DM_stat"], "p_value": dm["p_value"]})
     return pd.DataFrame(choice_rows), pd.DataFrame(test_rows), monthly
+
+
+# ======================================================= 3. morning load of D-1
+# Pre-registered decision rule, fixed before looking at any test result:
+# the morning features count as an improvement only if they lower the
+# validation MAPE in BOTH windows, for LightGBM and for Chronos-2.
+
+
+def _official_bc(df: pd.DataFrame, name: str, w: config.Window, test_index: pd.Index) -> pd.Series:
+    """The stronger benchmark: official forecast with validation-tuned bias correction."""
+    valid = _validation_forecasts(df, name, w)
+    params, _, _ = _choose(df, valid, "official")
+    both = pd.concat([valid["official"], df.loc[test_index, "load_official"]]).sort_index()
+    both = both[~both.index.duplicated(keep="last")]
+    d = df.loc[both.index]
+    date = pd.Series(d["date"].to_numpy(), index=both.index)
+    hour = pd.Series(both.index.tz_convert(config.TZ).hour, index=both.index)
+    return correct(both, d[TARGET], date, hour, **params).loc[test_index]
+
+
+def morning_load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    df = pd.read_parquet(P / "features.parquet")
+    dfm = features.add_morning_load(df)
+    feats_m = FEATURES + features.MORNING_FEATURES
+    valid_rows, test_rows, seg = [], [], None
+
+    for name, w in config.WINDOWS.items():
+        ctx = json.loads((P / f"meta_{name}.json").read_text())["chronos_context_hours"]
+
+        # ---- validation: the decision
+        lg_before, _ = _fit_on_validation(dfm, w, FEATURES)
+        lg_after, _ = _fit_on_validation(dfm, w, feats_m)
+        vdays = foundation.days_between(df, w.valid_start, w.test_start)
+        c0 = foundation.forecast(df, vdays, foundation.COVARIATES, ctx, cut_hour=0)
+        c8 = foundation.forecast(df, vdays, foundation.COVARIATES, ctx, cut_hour=features.MORNING_UNTIL)
+        ch_before, ch_after = _mape(c0, df.loc[c0.index, TARGET]), _mape(c8, df.loc[c8.index, TARGET])
+        valid_rows += [
+            {"window": name, "model": "LightGBM", "valid MAPE, load up to D-2 %": lg_before,
+             "valid MAPE, + D-1 until 08:00 %": lg_after},
+            {"window": name, "model": "Chronos-2", "valid MAPE, load up to D-2 %": ch_before,
+             "valid MAPE, + D-1 until 08:00 %": ch_after},
+        ]
+        print(f"{name:8s} validation  LightGBM {lg_before:.2f}% -> {lg_after:.2f}%   Chronos-2 {ch_before:.2f}% -> {ch_after:.2f}%")
+
+        # ---- test: looked at once, everything frozen
+        rounds, _ = models.choose_rounds(dfm, w, feature_list=feats_m)
+        lg_m, _ = models.rolling_lgbm(dfm, rounds, w, feature_list=feats_m)
+        tdays = foundation.days_between(df, w.test_start, w.test_end)
+        ch_m = foundation.forecast(df, tdays, foundation.COVARIATES, ctx, cut_hour=features.MORNING_UNTIL)
+
+        base = pd.read_parquet(P / f"pred_{name}.parquet")
+        base["ensemble"] = (base["lgbm"] + base["chronos_cov"]) / 2
+        preds = base[["official", "ensemble"]].join(lg_m.rename("lgbm_morning")).join(
+            ch_m.rename("chronos_morning")).dropna()
+        preds["ensemble_morning"] = (preds["lgbm_morning"] + preds["chronos_morning"]) / 2
+        preds["official+bc"] = _official_bc(df, name, w, preds.index)
+        preds = preds[["official", "official+bc", "ensemble", "lgbm_morning", "chronos_morning", "ensemble_morning"]]
+
+        t = df.loc[preds.index]
+        y = t[TARGET]
+        mon = (preds.sub(y, axis=0).abs().div(y, axis=0) * 100).groupby(
+            t.index.tz_convert(config.TZ).strftime("%Y-%m")).mean()
+        for col in preds:
+            test_rows.append({
+                "window": name, "model": col, "test MAPE %": _mape(preds[col], y),
+                "months beating official": int((mon[col] < mon["official"]).sum()),
+                "months beating official+bc": int((mon[col] < mon["official+bc"]).sum()),
+                "months": len(mon),
+            })
+        for a, b in [("ensemble_morning", "ensemble"), ("ensemble_morning", "official+bc")]:
+            dm = evaluate.diebold_mariano(t, preds[a], preds[b])
+            test_rows.append({"window": name, "model": f"DM {a} vs {b}",
+                              "DM_stat": dm["DM_stat"], "p_value": dm["p_value"]})
+        if name == "main":
+            seg = evaluate.segment_table(t, preds)
+    return pd.DataFrame(valid_rows), pd.DataFrame(test_rows), seg

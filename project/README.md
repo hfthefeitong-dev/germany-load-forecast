@@ -1,20 +1,23 @@
 # Beating Germany's official day-ahead load forecast, with less information
 
-Day-ahead forecasts of electricity demand for Germany, benchmarked against the official forecast that the four transmission system operators (TSOs) publish every day. The models use **strictly less information** than the official forecaster. An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast and beats it in every one of 21 test months**, across two separate out-of-sample periods. Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the advantage is **22 % in the main period** but only **7 % and not significant in the backtest** (see [below](#a-stronger-benchmark-the-official-forecast-after-bias-correction)). Forecast errors are then translated into **imbalance costs in euros** using the German imbalance price reBAP.
+Day-ahead forecasts of electricity demand for Germany, benchmarked against the official forecast that the four transmission system operators (TSOs) publish every day. The models use **less information** than the official forecaster, and every modelling choice is fixed on validation data before the test periods are touched.
+
+- An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast as published and beats it in all 21 test months**, across two separate out-of-sample periods.
+- Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the margin is **22 % in the main period but only 8 % and not significant in the backtest**.
+- Issuing the forecast at 10:00 on the day before and using **that morning's published load**, still well before the official forecast appears, raises the margin over the stronger benchmark to **23 % and 15 %, significant in both periods**.
+- Forecast errors are translated into **imbalance costs in euros** using the German imbalance price reBAP.
 
 | MAPE | Main test: Oct 2025 – Sep 2026 | Backtest: Jan – Sep 2025 |
 |---|---|---|
-| Naive: same hour last week | 5.53 % | 4.90 % |
-| **Official TSO forecast** | **3.84 %** | **3.83 %** |
-| LightGBM | 2.97 % | 3.34 % *(not significant)* |
-| Chronos-2, zero-shot foundation model | 3.01 % | 2.46 % |
-| **Ensemble: LightGBM + Chronos-2** | **2.69 %** | **2.59 %** |
-| Months in which the ensemble beats the official forecast | 12 of 12 | 9 of 9 |
+| Naive: same hour last week | 5.49 % | 4.86 % |
+| **Official TSO forecast, as published** | **3.84 %** | **3.83 %** |
 | *Stronger benchmark: official forecast + bias correction* | *3.43 %* | *2.87 %* |
-| *Ensemble + bias correction* | *2.67 %* | *2.66 %* |
-| *Months in which it beats the corrected official forecast* | *12 of 12, October a near tie* | *6 of 9* |
+| LightGBM | 2.99 % | 3.26 % *(not significant)* |
+| Chronos-2, zero-shot foundation model | 3.01 % | 2.46 % |
+| **Ensemble: LightGBM + Chronos-2** | **2.70 %** | **2.55 %** |
+| Ensemble, issued 10:00 on D-1 with that morning's load | 2.64 % | 2.43 % |
 
-Ensemble vs official: Diebold-Mariano p < 0.001 in both periods. Corrected ensemble vs corrected official: p < 0.001 in the main period, p = 0.20 in the backtest. Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md).
+Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load).
 
 ---
 
@@ -22,7 +25,7 @@ Ensemble vs official: Diebold-Mariano p < 0.001 in both periods. Corrected ensem
 
 ![Official forecast error vs sunshine](reports/figures/02_official_error_vs_sun.png)
 
-At midday the official forecast's error rises almost linearly with solar radiation: it under-forecasts on dull days and over-forecasts by up to 20 % on sunny ones. The likely cause is **behind-the-meter rooftop PV**. When the sun shines, households and businesses consume their own solar power, and the load seen by the grid drops. The effect is strongest on weekends and public holidays, when baseline demand is low. On sunny weekend and holiday middays the official forecast's error is 8.6 % in the main test period and 9.5 % in the backtest; the ensemble's is 2.7 % and 3.4 %.
+At midday the official forecast's error rises almost linearly with solar radiation: it under-forecasts on dull days and over-forecasts by up to 20 % on sunny ones. The likely cause is **behind-the-meter rooftop PV**. When the sun shines, households and businesses consume their own solar power, and the load seen by the grid drops. The effect is strongest on weekends and public holidays, when baseline demand is low. On sunny weekend and holiday middays the official forecast's error is 8.6 % in the main test period and 9.5 % in the backtest; the ensemble's is 2.8 % and 3.3 %.
 
 The largest official errors of the year were on **Sunday 26 April 2026** and **Labour Day, 1 May 2026**, both clear-sky days across all of Germany, with the forecast about 9 GW (24 %) too high.
 
@@ -32,19 +35,22 @@ The largest official errors of the year were on **Sunday 26 April 2026** and **L
 
 ## Fairness: the comparison is only meaningful if the model cannot see the future
 
-The official forecast for day D is published on day D-1 (by 18:00, per [SMARD](https://www.smard.de/page/en/wiki-article/5884/206318/forecast-data)). This project deliberately uses **less** than that:
+The official forecast for day D is published on day D-1 (by 18:00, per [SMARD](https://www.smard.de/page/en/wiki-article/5884/206318/forecast-data)). The main pipeline deliberately uses **less** than that:
 
 | Information | Used for day D | Why it is fair |
 |---|---|---|
-| Actual load | only up to the end of day **D-2** | minimum lag is 48 h, never 24 h |
+| Actual load | only up to the end of day **D-2** | same hour 2, 7 and 14 days back |
 | Weather | forecasts issued **48 h** before each hour | not observed weather, which would leak the future |
 | Calendar, holidays | any | known years in advance |
 | Hyperparameters | chosen on a validation period **before** each test period | test data is never used for tuning |
 | Model training | retrained monthly on data known at that time | the model never sees the month it predicts |
 
-The rule is enforced by an automated test ([`tests/test_leakage.py`](tests/test_leakage.py)): it scrambles the load of days D-1 and D and asserts that the features for day D do not change, and a second test confirms that scrambling day D-2 *does* change them.
+The rule is enforced by automated tests ([`tests/`](tests)): they scramble the load of days D-1 and D and assert that nothing the model sees for day D changes, and confirm that scrambling day D-2 *does* change it.
 
-A trap avoided along the way: Open-Meteo's *Historical Forecast API* sounds right but stitches together the first few hours of each weather model run, i.e. forecasts with a lead time of only hours. This project uses the *Previous Runs API* with `_previous_day2`, the genuine 48 h-ahead forecast.
+Two traps found along the way:
+
+- **Weather archives.** Open-Meteo's *Historical Forecast API* sounds right but stitches together the first few hours of each weather model run, i.e. forecasts with a lead time of only hours. This project uses the *Previous Runs API* with `_previous_day2`, the genuine 48 h-ahead forecast.
+- **Daylight saving time.** An early version computed lags as "48 hours earlier". On the day after clocks go back, day D-1 has 25 hours, so 48 hours before the last hour of D is midnight of D-1, which is not yet known. The leak was one hour per year; the original tests missed it because their data did not cover October. Lags are now looked up by local date and hour, and the tests cover both clock changes. Fixing it changed the ensemble's MAPE by at most 0.04 and LightGBM's by at most 0.08 percentage points.
 
 ---
 
@@ -63,7 +69,7 @@ All sources are free and need no registration. History starts in January 2024, w
 
 ## Method
 
-**Features** ([`features.py`](src/loadfc/features.py)). Hour, weekday, season; the *share of the population* on a public holiday (holidays differ by state, e.g. Epiphany only in BW, BY, ST); bridge days; the Christmas period; load 2, 7 and 14 days earlier; population-weighted temperature, radiation and cloud cover, plus radiation in the PV-heavy south.
+**Features** ([`features.py`](src/loadfc/features.py)). Hour, weekday, season; the *share of the population* on a public holiday (holidays differ by state, e.g. Epiphany only in BW, BY, ST); bridge days; the Christmas period; load at the same hour 2, 7 and 14 days earlier; population-weighted temperature, radiation and cloud cover, plus radiation in the PV-heavy south.
 
 **LightGBM** ([`models.py`](src/loadfc/models.py)). Gradient-boosted trees with an L1 objective, retrained at the start of every test month on all data known at that time. The number of trees is chosen by early stopping on the validation period.
 
@@ -84,27 +90,41 @@ All sources are free and need no registration. History starts in January 2024, w
 
 ![Month-by-month error](reports/figures/07_monthly_mape.png)
 
-**The ensemble is the only model that wins every month.** Each component fails somewhere:
+**The ensemble is the only model that beats the published official forecast in every month.** Each component fails somewhere:
 
-- **LightGBM needs history.** At the start of the backtest it had less than a year of training data and almost no winter. The validation period stopped boosting after only 141 trees, and its January 2025 error was 6.5 %. Over the backtest its advantage over the official forecast is not statistically significant (p = 0.23). With 20 months of history in the main period it is strong.
+- **LightGBM needs history.** At the start of the backtest it had less than a year of training data and little winter. Early stopping on the validation period kept only 155 trees, and its January 2025 error was 6.6 %. Over the backtest its advantage over the official forecast is not statistically significant (p = 0.18). With 20 months of history in the main period it is strong.
 - **Chronos-2 needs no training data but struggles with holidays.** Zero-shot, it is the best single model in the backtest. On public holidays, bridge days and at Christmas it is much worse than LightGBM, because holidays are rare in its context window. Even 8,192 hours (341 days) do not reach back to last year's Christmas.
-- **Averaging them is the safe choice, not always the best one.** The ensemble beats both components in 13 of 21 months, and in the backtest Chronos-2 alone is slightly better overall. What the ensemble adds is robustness: the two models rarely fail in the same month, so the average never has a bad one.
+- **Averaging them is the safe choice, not always the best one.** The ensemble beats both components in 12 of 21 months, and in the backtest Chronos-2 alone is slightly better overall. What the ensemble adds is robustness: the two models rarely fail in the same month.
 
 ![MAPE by situation, main test period](reports/figures/03_mape_by_segment.png)
 
 | MAPE [%], main test period | Official | LightGBM | Chronos-2 | Ensemble |
 |---|---|---|---|---|
-| All hours | 3.84 | 2.97 | 3.01 | **2.69** |
-| Working days | 3.51 | 2.81 | 2.83 | **2.58** |
-| Weekends | 4.43 | 3.36 | 3.01 | **2.80** |
-| Public holidays | 4.61 | **3.10** | 6.03 | 3.88 |
-| Bridge days | 7.25 | **2.66** | 6.55 | 4.34 |
-| Christmas period | 4.79 | **3.54** | 7.16 | 4.76 |
-| Sunny off-day middays | 8.57 | 3.16 | 3.41 | **2.69** |
+| All hours | 3.84 | 2.99 | 3.01 | **2.70** |
+| Working days | 3.51 | 2.82 | 2.83 | **2.58** |
+| Weekends | 4.43 | 3.40 | 3.01 | **2.82** |
+| Public holidays | 4.61 | **3.18** | 6.03 | 3.90 |
+| Bridge days | 7.25 | **2.72** | 6.55 | 4.36 |
+| Christmas period | 4.79 | **3.43** | 7.16 | 4.71 |
+| Sunny off-day middays | 8.57 | 3.23 | 3.41 | **2.75** |
 
 Public holidays remain the weak spot: in the backtest the ensemble's holiday error (6.0 %) is worse than the official forecast's (5.0 %).
 
-### A stronger benchmark: the official forecast after bias correction
+### What drives LightGBM's improvement? (ablation, main period)
+
+| MAPE [%] | All hours | Sunny off-day middays | Public holidays |
+|---|---|---|---|
+| Full model | 2.99 | 3.23 | 3.18 |
+| without solar radiation & cloud | 3.18 | 3.93 | 3.63 |
+| without any weather | 3.46 | 4.18 | 4.17 |
+| without holiday detail | 3.01 | 3.57 | 4.20 |
+| *Official forecast* | *3.84* | *8.57* | *4.61* |
+
+Removing solar features hurts exactly where the PV hypothesis predicts. But even with **no weather at all**, LightGBM still beats the official forecast, so calendar handling and recent load level matter as much as sunshine.
+
+---
+
+## A stronger benchmark: the official forecast after bias correction
 
 The official forecast's errors are not random: they drift in one direction for weeks, e.g. +2 GW on average in April and May. Such persistent bias can be removed with a few lines of code, so beating the *raw* official forecast partly means beating a fixable bias.
 
@@ -114,25 +134,40 @@ The correction subtracts a share `alpha` of the forecast's mean error over the l
 |---|---|---|
 | Official forecast | 3.84 % | 3.83 % |
 | Official forecast + bias correction | 3.43 % | 2.87 % |
-| Ensemble | 2.69 % | 2.59 % |
-| Ensemble + bias correction | 2.67 % | 2.66 % |
+| Ensemble | 2.70 % | 2.55 % |
+| Ensemble + bias correction | 2.66 % | 2.63 % |
 
 - **The correction helps the official forecast a lot and our models hardly at all.** Our models already adapt to the load level through their lagged features; the official forecast does not.
-- **Against the corrected official forecast, the main-period result holds** (22 % lower error, 12 of 12 months with October a near tie, p < 0.001). **The backtest result does not**: the gap shrinks to 7 %, the ensemble wins only 6 of 9 months, and the difference is not significant (p = 0.20).
+- **Against the corrected official forecast, the main-period result holds** (corrected vs corrected: 22 % lower error, 12 of 12 months, p < 0.001). **The backtest result does not**: the gap shrinks to 8 %, the ensemble wins 7 of 9 months, and the difference is not significant (p = 0.15).
 
-The honest summary: the models are clearly better than the official forecast *as published*, and clearly better than a corrected version when they have enough training history.
+---
 
-### What drives LightGBM's improvement? (ablation, main period)
+## Fresher data: the morning of day D-1
 
-| MAPE [%] | All hours | Sunny off-day middays | Public holidays |
-|---|---|---|---|
-| Full model | 2.97 | 3.16 | 3.10 |
-| without solar radiation & cloud | 3.15 | 3.89 | 3.78 |
-| without any weather | 3.46 | 4.15 | 4.39 |
-| without holiday detail | 3.02 | 3.53 | 4.07 |
-| *Official forecast* | *3.84* | *8.57* | *4.61* |
+The main pipeline only uses load up to the end of D-2. An upper-bound experiment shows that this is where the remaining headroom is ([`EXPERIMENTS.md`](reports/EXPERIMENTS.md), section 1): giving LightGBM the *observed* weather instead of the forecast barely changes its validation error, while giving it the *whole* of day D-1 lowers it by 11 to 15 %. The whole of D-1 is not available in time, but part of it is.
 
-Removing solar features hurts exactly where the PV hypothesis predicts. But even with **no weather at all**, LightGBM still beats the official forecast, so calendar handling and recent load level matter as much as sunshine.
+**Assumption.** The forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and long before the official forecast (18:00). SMARD publishes actual load with about 1 hour of delay (measured once, on 2026-09-24), so with a 2-hour safety margin the load from 00:00 to 07:59 on D-1 counts as known. LightGBM gets five features from that window ([`features.py`](src/loadfc/features.py), `add_morning_load`); Chronos-2 simply reads its context up to 08:00. A leakage test checks that nothing after 08:00 is used.
+
+**Decision rule, fixed in advance:** adopt only if the validation error improves in both periods for both models. It did:
+
+| Validation MAPE | Main | Backtest |
+|---|---|---|
+| LightGBM, load up to D-2 → + D-1 until 08:00 | 2.30 % → 2.20 % | 4.73 % → 4.07 % |
+| Chronos-2, load up to D-2 → + D-1 until 08:00 | 2.16 % → 2.01 % | 3.47 % → 2.88 % |
+
+**Test periods, looked at once:**
+
+| | Main | Backtest |
+|---|---|---|
+| Official forecast + bias correction | 3.43 % | 2.87 % |
+| Ensemble, load up to D-2 | 2.70 % | 2.55 % |
+| Ensemble, + D-1 until 08:00 | **2.64 %** | **2.43 %** |
+| vs ensemble up to D-2 | p = 0.15 | p = 0.06 |
+| vs corrected official forecast | 23 % lower, p < 0.001, 12 of 12 months | 15 % lower, p = 0.002, 8 of 9 months |
+
+The gain on the test periods is smaller than on validation and not significant on its own. Its value is that it makes the advantage over the stronger benchmark significant in both periods. Most of the main-period gain comes from the Christmas period, probably because the fresher context shows Chronos-2 that the holiday lull has already begun: its Christmas error falls from 7.2 % to 4.7 %, and the ensemble's from 4.7 % to 3.9 %. Segment table: [`EXPERIMENTS.md`](reports/EXPERIMENTS.md), section 3.
+
+The headline numbers of this README remain the conservative D-2 version, because the morning variant depends on a publication delay that was measured only once.
 
 ---
 
@@ -149,9 +184,9 @@ An error only costs money when the imbalance price moves away from the day-ahead
 | Extra imbalance cost [million €] | Main | Main, excl. extreme hours* | Backtest | Backtest, excl. extreme hours* |
 |---|---|---|---|---|
 | Official forecast | 145 | 82 | 114 | 105 |
-| LightGBM | **91** | 74 | 119 | 113 |
-| Chronos-2 | 114 | 74 | **79** | **85** |
-| Ensemble | 102 | 74 | 99 | 99 |
+| LightGBM | **103** | 81 | 120 | 114 |
+| Chronos-2 | 114 | **74** | **79** | **85** |
+| Ensemble | 109 | 77 | 99 | 100 |
 
 \* Excluding hours with |reBAP| > 1,000 €/MWh: 13 hours in the main period, 14 in the backtest. The main period uses Oct 2025 – Aug 2026, where quality-assured reBAP is available.
 
@@ -159,7 +194,7 @@ Three lessons:
 
 1. **The ensemble is cheaper than the official forecast in both periods**, with and without extreme hours.
 2. **The most accurate model is not reliably the cheapest.** In the main period the ensemble is most accurate but LightGBM is cheapest. In the backtest LightGBM is more accurate than the official forecast but costs more. Cost depends on whether errors coincide with system shortages, not only on their size. This motivates *value-oriented* forecasting, i.e. training on cost rather than on accuracy.
-3. **Cost differences are dominated by a few extreme hours.** In the main period, 13 hours account for most of the gap between the official forecast and LightGBM.
+3. **Cost differences are dominated by a few extreme hours.** In the main period, 13 hours account for almost the entire gap between the official forecast and LightGBM; without them the two cost about the same.
 
 This is a thought experiment, not a market simulation: if every BRP forecast better, the system imbalance and therefore reBAP itself would change.
 
@@ -168,9 +203,10 @@ This is a thought experiment, not a market simulation: if every BRP forecast bet
 ## Limitations
 
 - **21 test months in two periods.** More than one year, but the periods are consecutive and share most of their weather regime.
-- **The size of the advantage depends on the benchmark.** About 30 % against the published official forecast, 7 to 22 % against a bias-corrected version.
+- **The size of the advantage depends on the benchmark.** About 30 % against the published official forecast, 8 to 22 % against a bias-corrected version, and not significant in the backtest unless the morning load is used.
 - **Public holidays** are still forecast worse than the official forecast when training history is short.
-- **Weather is represented by one city per state.** Weighting radiation by installed PV capacity (from the Marktstammdatenregister) would model behind-the-meter PV more directly.
+- **The morning-load variant rests on a publication delay measured once.** A production system would have to check each morning which hours are actually published.
+- **Weather is represented by one city per state.** Weighting radiation by installed PV capacity (from the Marktstammdatenregister) would model behind-the-meter PV more directly, although the upper-bound experiment suggests little headroom from weather.
 - **Actual load values may be revised** after first publication. The lag features use final values, which a real-time forecaster would only have in provisional form.
 - **Point forecasts only.** A trader or BRP would also want uncertainty (quantiles); Chronos-2 produces them natively.
 - **No gating between models.** Using LightGBM on holidays and the ensemble elsewhere looks attractive in the tables, but choosing that rule after seeing the test results would be overfitting. It would need its own validation period.
@@ -184,12 +220,13 @@ Requires Python 3.12 and, for Chronos-2, a CUDA GPU (tested on an RTX 4090 under
 ```bash
 pip install -r requirements-lock.txt
 pip install -e . --no-deps
-python -m pytest                 # calendar and leakage tests
+python -m pytest                 # leakage, calendar and bias-correction tests
 python -m loadfc download        # ~3 min, all raw data
-python -m loadfc all             # ~5 min: LightGBM, ablation, Chronos-2, reports
+python -m loadfc all             # ~5 min: LightGBM, ablation, Chronos-2, reports/RESULTS.md
+python -m loadfc experiments     # ~8 min: reports/EXPERIMENTS.md
 ```
 
-`all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` writes to `reports/`, so the steps never overwrite each other.
+`all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.
 
 ```
 src/loadfc/
@@ -198,11 +235,12 @@ src/loadfc/
   weather.py      48 h-ahead weather forecasts, aggregation to national features
   rebap.py        imbalance price
   calendar_de.py  holiday share, bridge days, Christmas
-  features.py     feature table and the fairness rule
+  features.py     feature table, the fairness rule, morning-load features
   models.py       baselines, LightGBM with monthly retraining
   foundation.py   Chronos-2 zero-shot
   evaluate.py     metrics, segments, Diebold-Mariano test
   cost.py         imbalance cost
-tests/            fairness and calendar tests
-reports/          RESULTS.md, results.json, figures
+  experiments.py  upper bound, bias correction, morning load
+tests/            leakage, calendar, bias-correction and cutoff tests
+reports/          RESULTS.md, EXPERIMENTS.md, results.json, figures
 ```

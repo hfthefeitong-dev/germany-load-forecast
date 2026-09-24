@@ -30,9 +30,16 @@ CONTEXT_OPTIONS = (2048, 8192)  # about 12 weeks, or the model maximum of about 
 HORIZON = 50                    # from D-1 00:00 to the end of D, with slack for DST days
 
 
-def _frames(df: pd.DataFrame, day: pd.Timestamp, covariates: list[str], context_hours: int):
-    """Context and future tables for one forecast day `day` (local midnight)."""
-    cut = (day - pd.Timedelta(days=1)).tz_convert("UTC")
+def _frames(df: pd.DataFrame, day: pd.Timestamp, covariates: list[str], context_hours: int, cut_hour: int = 0):
+    """Context and future tables for one forecast day `day` (local midnight).
+
+    The context ends at `cut_hour` o'clock on day D-1: 0 means only load up to
+    D-2 is used; 8 matches the morning-load experiment in features.py.
+    """
+    # Calendar arithmetic, not "24 hours earlier": on daylight-saving days
+    # the two differ by an hour.
+    d1 = day - pd.DateOffset(days=1)
+    cut = pd.Timestamp(d1.year, d1.month, d1.day, cut_hour, tz=config.TZ).tz_convert("UTC")
     # Never reach back before the weather archive starts: covariates would be missing.
     first = max(cut - pd.Timedelta(hours=context_hours), config.HISTORY_START.tz_convert("UTC"))
     ctx = df[(df.index < cut) & (df.index >= first)]
@@ -60,13 +67,14 @@ def _pipeline():
 
 
 def forecast(
-    df: pd.DataFrame, days: list[pd.Timestamp], covariates: list[str], context_hours: int, batch: int = 16
+    df: pd.DataFrame, days: list[pd.Timestamp], covariates: list[str], context_hours: int,
+    batch: int = 16, cut_hour: int = 0,
 ) -> pd.Series:
     pipe = _pipeline()
     out = []
     for i in range(0, len(days), batch):
         chunk = days[i : i + batch]
-        pairs = [_frames(df, d, covariates, context_hours) for d in chunk]
+        pairs = [_frames(df, d, covariates, context_hours, cut_hour) for d in chunk]
         ctx = pd.concat([p[0] for p in pairs], ignore_index=True)
         fut = pd.concat([p[1] for p in pairs], ignore_index=True)
         kwargs = {"future_df": fut} if covariates else {}

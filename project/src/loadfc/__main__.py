@@ -235,6 +235,7 @@ def experiments() -> None:
 
     ub = ex.upper_bound()
     choice, test, _ = ex.bias_correction()
+    m_valid, m_test, m_seg = ex.morning_load()
     md = [
         "# Experiments", "",
         "Everything here is decided on the validation periods; the test periods are looked at once, afterwards.", "",
@@ -248,6 +249,16 @@ def experiments() -> None:
         choice.round(3).to_markdown(index=False), "",
         "Test periods, parameters frozen (`+bc` = bias-corrected):", "",
         test.round(4).to_markdown(index=False), "",
+        "## 3. Fresher load: day D-1 until 08:00", "",
+        "Assumes the forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and",
+        "the official forecast (18:00). SMARD publishes actual load with about 1 h delay (measured once,",
+        "2026-09-24), so load up to 07:59 is treated as known. Decision rule, fixed in advance: adopt only",
+        "if validation MAPE improves in both windows for both models.", "",
+        m_valid.round(3).to_markdown(index=False), "",
+        "Test periods, looked at once:", "",
+        m_test.round(4).to_markdown(index=False), "",
+        "MAPE by situation, main test period:", "",
+        m_seg.round(2).to_markdown(), "",
     ]
     (config.REPORTS / "EXPERIMENTS.md").write_text("\n".join(md))
     print("\n".join(md))

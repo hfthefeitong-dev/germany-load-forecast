@@ -5,7 +5,7 @@ THE FAIRNESS RULE
 The official forecast for day D is published on day D-1. Our forecast for
 day D may therefore only use information available at the start of D-1:
 
-  * load: only values from day D-2 or earlier    -> lags of at least 48 h
+  * load: only values from day D-2 or earlier    -> same hour 2, 7, 14 days back
   * weather: only forecasts issued >= 48 h ahead -> `_previous_day2`
   * calendar: known years in advance             -> always allowed
 
@@ -76,11 +76,16 @@ def build(series: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     df["holiday_share_lag2"] = (df["date"] - pd.Timedelta(days=2)).map(cal["holiday_share"])
     df["holiday_share_lag7"] = (df["date"] - pd.Timedelta(days=7)).map(cal["holiday_share"])
 
-    # ---- load history
+    # ---- load history: the same local hour 2, 7 and 14 days earlier.
+    # Looked up by (local date, local hour), not by shifting a fixed number of
+    # hours: when day D-1 has 25 hours (clocks going back), "48 hours before"
+    # the last hour of D is midnight of D-1, which is not yet known at
+    # forecast time. The names keep the familiar lag in hours.
     load = df[TARGET]
-    df["load_lag48"] = load.shift(48)
-    df["load_lag168"] = load.shift(168)
-    df["load_lag336"] = load.shift(336)
+    by_day_hour = load.groupby([df["date"], df["hour"]]).mean()
+    for days, col in [(2, "load_lag48"), (7, "load_lag168"), (14, "load_lag336")]:
+        key = pd.MultiIndex.from_arrays([df["date"] - pd.Timedelta(days=days), df["hour"]])
+        df[col] = by_day_hour.reindex(key).to_numpy()
 
     # Daily means are only used for days that are complete by the start of D-1.
     daily = load.groupby(df["date"]).mean()
@@ -91,4 +96,46 @@ def build(series: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     df["temp_daymean"] = df.groupby("date")["temp"].transform("mean")
     df["rad_daymean"] = df.groupby("date")["rad"].transform("mean")
 
+    return df
+
+
+# ------------------------------------------------------ fresher load (experiment)
+# Assumption: the forecast is issued on day D-1 at 10:00 local time, before the
+# day-ahead gate closure (12:00) and before the official forecast (18:00).
+# SMARD publishes actual load with about 1 h delay (measured 2026-09-24), so
+# with a 2 h safety margin the load of D-1 from 00:00 to 07:59 is known.
+MORNING_UNTIL = 8
+
+MORNING_FEATURES = [
+    "load_d1_morning_mean",   # mean load of D-1, 00:00-07:59
+    "load_d8_morning_mean",   # same window one week earlier, for comparison
+    "load_d1_morning_ratio",  # this week's level relative to last week's
+    "load_d1_last",           # the newest published hour, D-1 07:00
+    "load_d1_same_hour",      # same hour on D-1, only for hours before 08:00
+]
+
+
+def add_morning_load(df: pd.DataFrame, until: int = MORNING_UNTIL) -> pd.DataFrame:
+    """Add load features from the published morning of day D-1.
+
+    Lookups use (local date, local hour) rather than a fixed 24 h shift: on
+    daylight-saving days a 24 h shift would land one hour later and could
+    peek past the cutoff.
+    """
+    df = df.copy()
+    load = df[TARGET]
+    known = df["hour"] < until
+    by_day_hour = load.groupby([df["date"], df["hour"]]).mean()
+    morning = load.where(known).groupby(df["date"]).mean()
+
+    d1 = df["date"] - pd.Timedelta(days=1)
+    d8 = df["date"] - pd.Timedelta(days=8)
+    df["load_d1_morning_mean"] = d1.map(morning)
+    df["load_d8_morning_mean"] = d8.map(morning)
+    df["load_d1_morning_ratio"] = df["load_d1_morning_mean"] / df["load_d8_morning_mean"]
+    last = pd.MultiIndex.from_arrays([d1, pd.Series(until - 1, index=df.index)])
+    df["load_d1_last"] = by_day_hour.reindex(last).to_numpy()
+    same = pd.MultiIndex.from_arrays([d1, df["hour"]])
+    df["load_d1_same_hour"] = by_day_hour.reindex(same).to_numpy()
+    df.loc[~known, "load_d1_same_hour"] = float("nan")
     return df

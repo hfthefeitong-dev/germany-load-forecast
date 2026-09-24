@@ -41,24 +41,27 @@ def _trainable(df: pd.DataFrame) -> pd.DataFrame:
     return df[df[TARGET].notna() & df["load_lag336"].notna()]
 
 
-def choose_rounds(df: pd.DataFrame, w: config.Window, max_rounds: int = 5000) -> tuple[int, float]:
+def choose_rounds(
+    df: pd.DataFrame, w: config.Window, max_rounds: int = 5000, feature_list: list[str] | None = None
+) -> tuple[int, float]:
     """Pick the number of boosting rounds on the window's validation period.
 
     Training data ends one day before the validation period starts, for the
     same reason as in `rolling_lgbm`. Returns (best_rounds, validation MAPE %).
     """
+    feats = feature_list or FEATURES
     loc = _local(df)
     train = _trainable(df[(loc >= config.HISTORY_START) & (loc < w.valid_start - pd.Timedelta(days=1))])
     valid = _trainable(df[(loc >= w.valid_start) & (loc < w.test_start)])
 
     model = lgb.train(
         PARAMS,
-        lgb.Dataset(train[FEATURES], train[TARGET]),
+        lgb.Dataset(train[feats], train[TARGET]),
         num_boost_round=max_rounds,
-        valid_sets=[lgb.Dataset(valid[FEATURES], valid[TARGET])],
+        valid_sets=[lgb.Dataset(valid[feats], valid[TARGET])],
         callbacks=[lgb.early_stopping(200, verbose=False)],
     )
-    pred = model.predict(valid[FEATURES], num_iteration=model.best_iteration)
+    pred = model.predict(valid[feats], num_iteration=model.best_iteration)
     mape = float(np.mean(np.abs(pred - valid[TARGET]) / valid[TARGET]) * 100)
     return model.best_iteration, mape
 
