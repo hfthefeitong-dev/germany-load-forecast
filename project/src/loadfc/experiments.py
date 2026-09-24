@@ -257,6 +257,7 @@ def morning_load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             ch_m.rename("chronos_morning")).dropna()
         preds["ensemble_morning"] = (preds["lgbm_morning"] + preds["chronos_morning"]) / 2
         preds["official+bc"] = _official_bc(df, name, w, preds.index)
+        preds.to_parquet(P / f"morning_pred_{name}.parquet")  # reused by the fine-tuning experiment
         preds = preds[["official", "official+bc", "ensemble", "lgbm_morning", "chronos_morning", "ensemble_morning"]]
 
         t = df.loc[preds.index]
@@ -277,3 +278,123 @@ def morning_load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         if name == "main":
             seg = evaluate.segment_table(t, preds)
     return pd.DataFrame(valid_rows), pd.DataFrame(test_rows), seg
+
+
+# ================================================== 4. fine-tuning Chronos-2
+# Pre-registered decision rule: fine-tuning counts as an improvement only if
+# the best fine-tuned configuration beats zero-shot Chronos-2 on the
+# validation period of BOTH windows.
+#
+# Protocol per window:
+#   selection  fine-tune on data up to one day before the validation period,
+#              score each configuration with the usual day-ahead procedure
+#   test       fine-tune once more with the chosen configuration on all data
+#              up to one day before the test period, then forecast the whole
+#              test period with that model (no monthly refresh)
+
+FT_CONFIGS = [
+    {"finetune_mode": "lora", "learning_rate": 1e-5, "num_steps": 500},
+    {"finetune_mode": "lora", "learning_rate": 1e-5, "num_steps": 2000},
+    {"finetune_mode": "full", "learning_rate": 1e-6, "num_steps": 500},
+    {"finetune_mode": "full", "learning_rate": 1e-6, "num_steps": 2000},
+]
+FT_CONTEXT = 2048   # fine-tuning with 8192 h is ~10x slower (2.7 s per step)
+FT_BATCH = 64
+
+
+def _finetune(df: pd.DataFrame, until: pd.Timestamp, cfg: dict):
+    """Fine-tune a copy of Chronos-2 on the load history before `until`."""
+    import shutil
+
+    import torch
+    from chronos.chronos2 import preprocess
+
+    tr = df[(df.index >= config.HISTORY_START.tz_convert("UTC")) & (df.index < until.tz_convert("UTC"))]
+    long = tr[[TARGET, *foundation.COVARIATES]].copy()
+    long["id"], long["timestamp"] = "DE", long.index.tz_localize(None)
+    inputs = preprocess.from_data_frame(
+        long.reset_index(drop=True), target_columns=[TARGET], prediction_length=foundation.HORIZON,
+        known_covariates_names=foundation.COVARIATES, id_column="id", timestamp_column="timestamp",
+    )
+    out = config.ROOT / "data" / "chronos_ft_tmp"
+    torch.manual_seed(0)
+    ft = foundation._pipeline().fit(
+        inputs, prediction_length=foundation.HORIZON, context_length=FT_CONTEXT, batch_size=FT_BATCH,
+        output_dir=str(out), report_to="none", seed=0, **cfg,
+    )
+    shutil.rmtree(out, ignore_errors=True)  # intermediate checkpoints are ~0.5 GB each
+    return ft
+
+
+def finetune() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    import gc
+
+    import torch
+
+    df = pd.read_parquet(P / "features.parquet")
+    select_rows, test_rows, seg = [], [], None
+    for name, w in config.WINDOWS.items():
+        meta = json.loads((P / f"meta_{name}.json").read_text())
+        zero_shot = min(meta["chronos_valid_MAPE_%"].values())
+        vdays = foundation.days_between(df, w.valid_start, w.test_start)
+
+        # ---- selection on validation
+        best = None
+        for cfg in FT_CONFIGS:
+            ft = _finetune(df, w.valid_start - pd.Timedelta(days=1), cfg)
+            for ctx in foundation.CONTEXT_OPTIONS:
+                pred = foundation.forecast(df, vdays, foundation.COVARIATES, ctx, pipe=ft)
+                mape = _mape(pred, df.loc[pred.index, TARGET])
+                select_rows.append({"window": name, **cfg, "inference context h": ctx,
+                                    "valid MAPE %": mape, "zero-shot valid MAPE %": zero_shot})
+                print(f"{name:8s} {cfg} ctx {ctx}: {mape:.2f}% (zero-shot {zero_shot:.2f}%)", flush=True)
+                if best is None or mape < best[0]:
+                    best = (mape, cfg, ctx)
+            del ft
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        # ---- test, once, with the chosen configuration
+        _, cfg, ctx = best
+        print(f"{name:8s} chosen {cfg}, inference context {ctx} h", flush=True)
+        ft = _finetune(df, w.test_start - pd.Timedelta(days=1), cfg)
+        tdays = foundation.days_between(df, w.test_start, w.test_end)
+        ch_ft = foundation.forecast(df, tdays, foundation.COVARIATES, ctx, pipe=ft).rename("chronos_ft")
+        ch_ft_m = foundation.forecast(df, tdays, foundation.COVARIATES, ctx, pipe=ft,
+                                      cut_hour=features.MORNING_UNTIL).rename("chronos_ft_morning")
+        del ft
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        base = pd.read_parquet(P / f"pred_{name}.parquet")
+        base["ensemble"] = (base["lgbm"] + base["chronos_cov"]) / 2
+        morning = pd.read_parquet(P / f"morning_pred_{name}.parquet")
+        preds = (base[["official", "chronos_cov", "lgbm", "ensemble"]]
+                 .join(morning[["official+bc", "lgbm_morning", "ensemble_morning"]])
+                 .join(ch_ft).join(ch_ft_m).dropna())
+        preds["ensemble_ft"] = (preds["lgbm"] + preds["chronos_ft"]) / 2
+        preds["ensemble_ft_morning"] = (preds["lgbm_morning"] + preds["chronos_ft_morning"]) / 2
+        preds = preds[["official", "official+bc", "chronos_cov", "chronos_ft", "ensemble", "ensemble_ft",
+                       "ensemble_morning", "ensemble_ft_morning"]]
+        preds.to_parquet(P / f"finetune_pred_{name}.parquet")
+
+        t = df.loc[preds.index]
+        y = t[TARGET]
+        mon = (preds.sub(y, axis=0).abs().div(y, axis=0) * 100).groupby(
+            t.index.tz_convert(config.TZ).strftime("%Y-%m")).mean()
+        for col in preds:
+            test_rows.append({
+                "window": name, "model": col, "test MAPE %": _mape(preds[col], y),
+                "months beating official": int((mon[col] < mon["official"]).sum()),
+                "months beating official+bc": int((mon[col] < mon["official+bc"]).sum()),
+                "months": len(mon),
+            })
+        for a, b in [("chronos_ft", "chronos_cov"), ("ensemble_ft", "ensemble"),
+                     ("ensemble_ft_morning", "ensemble_morning"), ("ensemble_ft_morning", "official+bc")]:
+            dm = evaluate.diebold_mariano(t, preds[a], preds[b])
+            test_rows.append({"window": name, "model": f"DM {a} vs {b}",
+                              "DM_stat": dm["DM_stat"], "p_value": dm["p_value"]})
+        test_rows.append({"window": name, "model": f"chosen: {cfg}, inference context {ctx} h"})
+        if name == "main":
+            seg = evaluate.segment_table(t, preds)
+    return pd.DataFrame(select_rows), pd.DataFrame(test_rows), seg

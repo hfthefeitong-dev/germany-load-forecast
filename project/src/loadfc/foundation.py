@@ -68,9 +68,10 @@ def _pipeline():
 
 def forecast(
     df: pd.DataFrame, days: list[pd.Timestamp], covariates: list[str], context_hours: int,
-    batch: int = 16, cut_hour: int = 0,
+    batch: int = 16, cut_hour: int = 0, pipe=None,
 ) -> pd.Series:
-    pipe = _pipeline()
+    """`pipe` defaults to the zero-shot model; pass a fine-tuned pipeline to use that instead."""
+    pipe = pipe if pipe is not None else _pipeline()
     out = []
     for i in range(0, len(days), batch):
         chunk = days[i : i + batch]

@@ -9,6 +9,7 @@ Run the steps in this order, or all at once with `all`:
     python -m loadfc summary    # all tables and figures in reports/
     python -m loadfc all        # run + ablation + chronos + summary
     python -m loadfc experiments  # exploration, writes reports/EXPERIMENTS.md
+    python -m loadfc finetune   # fine-tune Chronos-2 (GPU, ~1 h), writes reports/FINETUNE.md
 
 Only `summary` writes to reports/. The earlier steps save intermediate
 results to data/processed/, so no step overwrites another step's output.
@@ -264,6 +265,26 @@ def experiments() -> None:
     print("\n".join(md))
 
 
+def finetune() -> None:
+    """Fine-tune Chronos-2 on German load (GPU, about an hour). Writes reports/FINETUNE.md."""
+    from . import experiments as ex
+
+    if not all((P / f"morning_pred_{n}.parquet").exists() for n in config.WINDOWS):
+        ex.morning_load()
+    select, test, seg = ex.finetune()
+    md = [
+        "# Fine-tuning Chronos-2", "",
+        "Decision rule, fixed in advance: fine-tuning counts only if it beats zero-shot Chronos-2 on the",
+        "validation period of both windows. Selection fine-tunes on data before the validation period;",
+        "the test model is fine-tuned once on data before the test period and not refreshed.", "",
+        "## Selection on validation", "", select.astype({"learning_rate": str}).round(3).to_markdown(index=False), "",
+        "## Test periods, looked at once", "", test.round(4).to_markdown(index=False), "",
+        "## MAPE by situation, main test period", "", seg.round(2).to_markdown(), "",
+    ]
+    (config.REPORTS / "FINETUNE.md").write_text("\n".join(md))
+    print("\n".join(md))
+
+
 def all_steps() -> None:
     run()
     ablation()
@@ -273,7 +294,7 @@ def all_steps() -> None:
 
 if __name__ == "__main__":
     commands = {"download": download, "run": run, "ablation": ablation, "chronos": chronos,
-                "summary": summary, "all": all_steps, "experiments": experiments}
+                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune}
     if len(sys.argv) != 2 or sys.argv[1] not in commands:
         print(__doc__)
         sys.exit(1)

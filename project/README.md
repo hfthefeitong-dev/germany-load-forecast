@@ -17,7 +17,7 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 | **Ensemble: LightGBM + Chronos-2** | **2.70 %** | **2.55 %** |
 | Ensemble, issued 10:00 on D-1 with that morning's load | 2.64 % | 2.43 % |
 
-Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load).
+Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) and [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning).
 
 ---
 
@@ -171,6 +171,26 @@ The headline numbers of this README remain the conservative D-2 version, because
 
 ---
 
+## Fine-tuning Chronos-2: helps with enough history, not yet adopted
+
+Chronos-2 can be fine-tuned on German load with the library's `fit` method (full or LoRA). Four configurations were tried, each fine-tuned on data before the validation period and scored with the usual day-ahead procedure ([`reports/FINETUNE.md`](reports/FINETUNE.md)).
+
+**Decision rule, fixed in advance:** adopt only if the best fine-tuned model beats zero-shot Chronos-2 on the validation period of both windows. **It did not.**
+
+| | Main | Backtest |
+|---|---|---|
+| Validation, zero-shot | 2.16 % | 3.47 % |
+| Validation, best fine-tuned | **2.02 %** | 3.55 % |
+| Test, Chronos-2 zero-shot → fine-tuned | 3.01 % → **2.66 %** (p < 0.001) | 2.46 % → 2.47 % |
+| Test, ensemble → ensemble with fine-tuned Chronos-2 | 2.70 % → **2.59 %** (p = 0.009) | 2.55 % → 2.57 % |
+| Test, same + D-1 morning load | **2.53 %** | 2.45 % |
+
+The test results match what the validation periods predicted. With 17 months of history before the main validation period, fine-tuning helps, above all where zero-shot Chronos-2 was weakest: its main-period holiday error falls from 6.0 % to 4.5 % and its Christmas error from 7.2 % to 4.2 %. With 8 months before the backtest validation period, it does not. This is the same pattern as for LightGBM: learned components need history, and zero-shot is the better choice when data is short.
+
+Going forward, with close to three years of history, fine-tuning is likely to pay off. Whether it does is exactly what the prospective test from October 2026 can show; picking it now because it won the main test period would be choosing after seeing the results.
+
+---
+
 ## What are the errors worth?
 
 A balance responsible party (BRP) buys its forecast F on the day-ahead market at price P_da. Actual demand turns out to be A, and the difference is settled at the imbalance price reBAP:
@@ -224,6 +244,7 @@ python -m pytest                 # leakage, calendar and bias-correction tests
 python -m loadfc download        # ~3 min, all raw data
 python -m loadfc all             # ~5 min: LightGBM, ablation, Chronos-2, reports/RESULTS.md
 python -m loadfc experiments     # ~8 min: reports/EXPERIMENTS.md
+python -m loadfc finetune        # ~40 min on GPU: reports/FINETUNE.md
 ```
 
 `all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.
