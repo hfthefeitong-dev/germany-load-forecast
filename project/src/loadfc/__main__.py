@@ -8,6 +8,7 @@ Run the steps in this order, or all at once with `all`:
     python -m loadfc chronos    # Chronos-2 zero-shot for every window (GPU)
     python -m loadfc summary    # all tables and figures in reports/
     python -m loadfc all        # run + ablation + chronos + summary
+    python -m loadfc experiments  # exploration, writes reports/EXPERIMENTS.md
 
 Only `summary` writes to reports/. The earlier steps save intermediate
 results to data/processed/, so no step overwrites another step's output.
@@ -227,6 +228,31 @@ def summary() -> None:
     print("\n".join(md))
 
 
+def experiments() -> None:
+    """Exploration: upper bound on input quality, and bias correction.
+    Writes reports/EXPERIMENTS.md; the main results are not touched."""
+    from . import experiments as ex
+
+    ub = ex.upper_bound()
+    choice, test, _ = ex.bias_correction()
+    md = [
+        "# Experiments", "",
+        "Everything here is decided on the validation periods; the test periods are looked at once, afterwards.", "",
+        "## 1. Upper bound: what if the inputs were perfect?", "",
+        "LightGBM trained before, and early-stopped on, each validation period. The cheat variants use",
+        "information a real day-ahead forecaster cannot have; the gain shows how much headroom each input has.", "",
+        ub.round(2).to_markdown(index=False), "",
+        "## 2. Bias correction", "",
+        "Forecast for day D minus alpha times the mean error of the last `window_days` days known at",
+        "forecast time (up to D-2). Parameters chosen on validation:", "",
+        choice.round(3).to_markdown(index=False), "",
+        "Test periods, parameters frozen (`+bc` = bias-corrected):", "",
+        test.round(4).to_markdown(index=False), "",
+    ]
+    (config.REPORTS / "EXPERIMENTS.md").write_text("\n".join(md))
+    print("\n".join(md))
+
+
 def all_steps() -> None:
     run()
     ablation()
@@ -236,7 +262,7 @@ def all_steps() -> None:
 
 if __name__ == "__main__":
     commands = {"download": download, "run": run, "ablation": ablation, "chronos": chronos,
-                "summary": summary, "all": all_steps}
+                "summary": summary, "all": all_steps, "experiments": experiments}
     if len(sys.argv) != 2 or sys.argv[1] not in commands:
         print(__doc__)
         sys.exit(1)

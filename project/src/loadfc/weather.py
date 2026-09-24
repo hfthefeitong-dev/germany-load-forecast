@@ -24,16 +24,16 @@ VARIABLES = ("temperature_2m", "shortwave_radiation", "cloud_cover")
 LEAD = "previous_day2"
 
 
-def _fetch_block(start: str, end: str) -> pd.DataFrame:
+def _fetch_block(start: str, end: str, url: str = URL, suffix: str = f"_{LEAD}") -> pd.DataFrame:
     params = {
         "latitude": ",".join(str(s.lat) for s in config.STATES),
         "longitude": ",".join(str(s.lon) for s in config.STATES),
         "start_date": start,
         "end_date": end,
-        "hourly": ",".join(f"{v}_{LEAD}" for v in VARIABLES),
+        "hourly": ",".join(f"{v}{suffix}" for v in VARIABLES),
         "timezone": "UTC",
     }
-    r = requests.get(URL, params=params, timeout=180)
+    r = requests.get(url, params=params, timeout=180)
     r.raise_for_status()
     payload = r.json()
 
@@ -41,22 +41,32 @@ def _fetch_block(start: str, end: str) -> pd.DataFrame:
     for state, loc in zip(config.STATES, payload):
         h = loc["hourly"]
         idx = pd.to_datetime(h["time"], utc=True)
-        cols = {f"{v}__{state.code}": h[f"{v}_{LEAD}"] for v in VARIABLES}
+        cols = {f"{v}__{state.code}": h[f"{v}{suffix}"] for v in VARIABLES}
         frames.append(pd.DataFrame(cols, index=idx, dtype="float64"))
     return pd.concat(frames, axis=1)
 
 
-def download(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+def download(start: pd.Timestamp, end: pd.Timestamp, url: str = URL, suffix: str = f"_{LEAD}") -> pd.DataFrame:
     """Per-state hourly forecasts, one request per calendar year."""
     blocks = []
     for year in range(start.year, end.year + 1):
         a = max(start, pd.Timestamp(f"{year}-01-01", tz=start.tz))
         b = min(end, pd.Timestamp(f"{year}-12-31", tz=start.tz))
-        blocks.append(_fetch_block(a.strftime("%Y-%m-%d"), b.strftime("%Y-%m-%d")))
+        blocks.append(_fetch_block(a.strftime("%Y-%m-%d"), b.strftime("%Y-%m-%d"), url, suffix))
     df = pd.concat(blocks).sort_index()
     df = df[~df.index.duplicated(keep="last")]
     df.index.name = "time_utc"
     return df
+
+
+# Observed weather (ERA5 reanalysis). ONLY for the upper-bound experiment in
+# experiments.py: it measures how much accuracy is lost because weather
+# forecasts are imperfect. Using it in a real forecast would be cheating.
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+
+def download_observed(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    return download(start, end, url=ARCHIVE_URL, suffix="")
 
 
 def aggregate(per_state: pd.DataFrame) -> pd.DataFrame:
