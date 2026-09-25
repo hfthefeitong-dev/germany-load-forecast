@@ -8,6 +8,9 @@
 
 param([switch]$DryRun)
 
+# git and wsl write normal progress messages to stderr. PowerShell 5.1 turns those
+# into red NativeCommandError records; ForEach-Object { "$_" } logs them as plain text.
+
 $repo = "E:\Coding\energy-ml-lab"
 $logDir = Join-Path $repo "project\data\live_logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -19,11 +22,11 @@ function Log($text) { "[{0:HH:mm:ss}] {1}" -f (Get-Date), $text | Out-File -Appe
 Log "start, target day $target, dry run: $DryRun"
 $flag = if ($DryRun) { " --dry-run" } else { "" }
 $bash = "source ~/venvs/cs336/bin/activate && export HF_HOME=/mnt/e/Coding/energy-ml-lab/data/hf && cd /mnt/e/Coding/energy-ml-lab/project && python -m loadfc live$flag && python -m loadfc live_eval"
-wsl.exe -d Ubuntu-24.04 -- bash -lc $bash 2>&1 | Out-File -Append -Encoding utf8 $log
+wsl.exe -d Ubuntu-24.04 -- bash -lc $bash 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
 Log "python finished with exit code $LASTEXITCODE"
 if ($DryRun) { Log "dry run: no commit, no push"; exit 0 }
 
-git -C $repo add project/live project/reports/LIVE.md 2>&1 | Out-File -Append -Encoding utf8 $log
-git -C $repo commit -m "live: forecast for $target" 2>&1 | Out-File -Append -Encoding utf8 $log
-git -C $repo push 2>&1 | Out-File -Append -Encoding utf8 $log
+git -C $repo add project/live project/reports/LIVE.md 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
+git -C $repo commit -m "live: forecast for $target" 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
+git -C $repo push 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
 Log "git push finished with exit code $LASTEXITCODE"
