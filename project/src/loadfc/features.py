@@ -139,3 +139,53 @@ def add_morning_load(df: pd.DataFrame, until: int = MORNING_UNTIL) -> pd.DataFra
     df["load_d1_same_hour"] = by_day_hour.reindex(same).to_numpy()
     df.loc[~known, "load_d1_same_hour"] = float("nan")
     return df
+
+
+
+# ------------------------------------------- PV and storage capacity (experiment)
+# Monthly installed capacity from capacity.py, lagged by CAPACITY_LAG_MONTHS
+# because the register is published with a delay.
+CAPACITY_LAG_MONTHS = 2
+
+PV_FEATURES = [
+    "pv_gw",                 # installed PV, GWp
+    "battery_gwh",           # installed battery storage, GWh
+    "pv_potential",          # pv_gw x forecast radiation: PV output if all panels produced
+    "pv_potential_south",    # same with radiation in the PV-heavy south
+    "pv_potential_delta7",   # change against the same hour one week earlier
+    "battery_evening",       # battery_gwh x daily mean radiation: how full batteries get
+    "battery_evening_delta7",
+]
+
+
+def add_pv_features(df: pd.DataFrame, capacity: pd.DataFrame, lag_months: int = CAPACITY_LAG_MONTHS) -> pd.DataFrame:
+    """Physics-motivated features for behind-the-meter PV and home batteries.
+
+    Grid load drops when rooftop PV produces, roughly in proportion to
+    installed capacity times irradiance. Capacity grows by about 1 % per
+    month, so a model that only sees radiation cannot know that the same
+    sunshine removes more load every year.
+
+    The delta7 features compare with the same hour one week earlier. The
+    model already sees last week's load (load_lag168), so the delta says how
+    much more or less PV to expect than then. It also stays within the range
+    seen in training, which matters because tree models do not extrapolate.
+    """
+    df = df.copy()
+    month = df["date"].dt.to_period("M")
+    cap = capacity.copy()
+    cap.index = cap.index.to_period("M")
+    source = month - lag_months
+    for col in ["pv_gw", "battery_gwh"]:
+        df[col] = source.map(cap[col]).astype("float64")
+
+    df["pv_potential"] = df["pv_gw"] * df["rad"] / 1000        # GW-like index (1000 W/m2 = STC)
+    df["pv_potential_south"] = df["pv_gw"] * df["rad_south"] / 1000
+    df["battery_evening"] = df["battery_gwh"] * df["rad_daymean"] / 1000
+
+    by_day_hour = df.groupby([df["date"], df["hour"]])[["pv_potential", "battery_evening"]].mean()
+    key = pd.MultiIndex.from_arrays([df["date"] - pd.Timedelta(days=7), df["hour"]])
+    week_ago = by_day_hour.reindex(key)
+    df["pv_potential_delta7"] = df["pv_potential"].to_numpy() - week_ago["pv_potential"].to_numpy()
+    df["battery_evening_delta7"] = df["battery_evening"].to_numpy() - week_ago["battery_evening"].to_numpy()
+    return df

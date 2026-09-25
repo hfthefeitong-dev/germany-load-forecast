@@ -17,7 +17,7 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 | **Ensemble: LightGBM + Chronos-2** | **2.70 %** | **2.55 %** |
 | Ensemble, issued 10:00 on D-1 with that morning's load | 2.64 % | 2.43 % |
 
-Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) and [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning).
+Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) , [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning) and [`reports/PV.md`](reports/PV.md) (capacity features).
 
 ---
 
@@ -191,6 +191,16 @@ Going forward, with close to three years of history, fine-tuning is likely to pa
 
 ---
 
+## An idea that did not work: PV and battery capacity features
+
+Installed PV grew from 85 to 128 GWp and home and grid batteries from 13 to 32 GWh between January 2024 and mid-2026 (Energy-Charts, Fraunhofer ISE). The idea: give the models physics-motivated features, installed capacity times forecast radiation and its change against last week, so they know that the same sunshine removes more grid load every year ([`reports/PV.md`](reports/PV.md)).
+
+It failed the pre-registered rule, and the test periods agree: the main-period ensemble got significantly worse (2.70 % → 2.83 %, p < 0.001). The features did help exactly where intended, on sunny weekend and holiday middays (LightGBM 3.23 % → 2.90 %), but hurt elsewhere, most at Christmas (3.43 % → 4.22 %). The likely reason: installed capacity rises almost every month, so to a tree model it acts as a disguised date and lets it memorise periods instead of learning physics. A variant with only the trend-free change features would test this, but it has not been run.
+
+A diagnostic in the same report also contradicts an earlier assumption of this project: the official forecast's sunshine-related error did *not* grow from 2024 to 2026. Its PV problem is persistent, not worsening.
+
+---
+
 ## What are the errors worth?
 
 A balance responsible party (BRP) buys its forecast F on the day-ahead market at price P_da. Actual demand turns out to be A, and the difference is settled at the imbalance price reBAP:
@@ -245,6 +255,7 @@ python -m loadfc download        # ~3 min, all raw data
 python -m loadfc all             # ~5 min: LightGBM, ablation, Chronos-2, reports/RESULTS.md
 python -m loadfc experiments     # ~8 min: reports/EXPERIMENTS.md
 python -m loadfc finetune        # ~40 min on GPU: reports/FINETUNE.md
+python -m loadfc pv              # ~15 min: reports/PV.md
 ```
 
 `all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.
@@ -261,7 +272,8 @@ src/loadfc/
   foundation.py   Chronos-2 zero-shot
   evaluate.py     metrics, segments, Diebold-Mariano test
   cost.py         imbalance cost
-  experiments.py  upper bound, bias correction, morning load
+  experiments.py  upper bound, bias correction, morning load, fine-tuning, PV capacity
+  capacity.py     installed PV and battery capacity (Energy-Charts)
 tests/            leakage, calendar, bias-correction and cutoff tests
 reports/          RESULTS.md, EXPERIMENTS.md, results.json, figures
 ```

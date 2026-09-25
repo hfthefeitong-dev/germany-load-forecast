@@ -10,6 +10,7 @@ Run the steps in this order, or all at once with `all`:
     python -m loadfc all        # run + ablation + chronos + summary
     python -m loadfc experiments  # exploration, writes reports/EXPERIMENTS.md
     python -m loadfc finetune   # fine-tune Chronos-2 (GPU, ~1 h), writes reports/FINETUNE.md
+    python -m loadfc pv         # PV and battery capacity features, writes reports/PV.md
 
 Only `summary` writes to reports/. The earlier steps save intermediate
 results to data/processed/, so no step overwrites another step's output.
@@ -285,6 +286,31 @@ def finetune() -> None:
     print("\n".join(md))
 
 
+def pv() -> None:
+    """PV and battery capacity features (about 15 minutes). Writes reports/PV.md."""
+    from . import experiments as ex
+
+    diag, valid, test, seg, importance = ex.pv_capacity()
+    md = [
+        "# PV and battery storage capacity", "",
+        "Monthly installed PV (GWp) and battery storage (GWh) from Energy-Charts (Fraunhofer ISE),",
+        "lagged by two months, turned into physics-motivated features: capacity x forecast radiation,",
+        "its change against the same hour last week, and battery capacity x daily radiation.",
+        "Decision rule, fixed in advance: a model adopts the features only if its validation MAPE",
+        "improves in both windows.", "",
+        "## Diagnostic: does the official forecast fall further behind the PV build-out?", "",
+        "Slope of the official forecast's midday error against forecast radiation, per year.", "",
+        diag.round(2).to_markdown(index=False), "",
+        "## Validation", "", valid.round(3).to_markdown(index=False), "",
+        "## Test periods, looked at once", "", test.round(4).to_markdown(index=False), "",
+        "## MAPE by situation, main test period", "", seg.round(2).to_markdown(), "",
+        "## LightGBM feature importance with PV features (last main-period model)", "",
+        importance.round(2).to_markdown(), "",
+    ]
+    (config.REPORTS / "PV.md").write_text("\n".join(md))
+    print("\n".join(md))
+
+
 def all_steps() -> None:
     run()
     ablation()
@@ -294,7 +320,7 @@ def all_steps() -> None:
 
 if __name__ == "__main__":
     commands = {"download": download, "run": run, "ablation": ablation, "chronos": chronos,
-                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune}
+                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune, "pv": pv}
     if len(sys.argv) != 2 or sys.argv[1] not in commands:
         print(__doc__)
         sys.exit(1)

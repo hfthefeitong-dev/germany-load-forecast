@@ -17,7 +17,7 @@ import json
 import lightgbm as lgb
 import pandas as pd
 
-from . import config, evaluate, features, foundation, models, weather
+from . import capacity, config, evaluate, features, foundation, models, weather
 from .features import FEATURES, TARGET
 
 P = config.DATA_PROCESSED
@@ -398,3 +398,97 @@ def finetune() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         if name == "main":
             seg = evaluate.segment_table(t, preds)
     return pd.DataFrame(select_rows), pd.DataFrame(test_rows), seg
+
+
+
+# ============================================ 5. PV and battery capacity
+# Pre-registered decision rule, per model: the capacity features count as an
+# improvement only if they lower the validation MAPE in BOTH windows.
+
+PV_COVARIATES = ["pv_potential", "pv_potential_south", "battery_evening"]
+
+
+def _pv_slope_by_year(df: pd.DataFrame) -> pd.DataFrame:
+    """Diagnostic: how strongly does the official forecast's midday error grow with sunshine, per year?
+
+    Slope of a least-squares line through (radiation, official error in %),
+    for working-day and off-day middays separately. A slope that rises over
+    the years means the official forecast falls further behind the PV build-out.
+    """
+    loc = df.index.tz_convert(config.TZ)
+    mid = df["hour"].between(10, 16) & df[TARGET].notna() & df["load_official"].notna() & df["rad"].notna()
+    err = (df["load_official"] - df[TARGET]) / df[TARGET] * 100
+    rows = []
+    for year in sorted(set(loc.year)):
+        for label, mask in [("working days", df["is_offday"] == 0), ("weekends & holidays", df["is_offday"] == 1)]:
+            m = mid & mask & (loc.year == year)
+            if m.sum() < 200:
+                continue
+            x, y = df.loc[m, "rad"], err[m]
+            slope = float(((x - x.mean()) * (y - y.mean())).sum() / ((x - x.mean()) ** 2).sum())
+            rows.append({"year": year, "days": label, "hours": int(m.sum()),
+                         "error slope, % per 100 W/m2": slope * 100})
+    return pd.DataFrame(rows)
+
+
+def pv_capacity() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    df = pd.read_parquet(P / "features.parquet")
+    cap = capacity.load()
+    dfp = features.add_pv_features(df, cap)
+    feats_pv = FEATURES + features.PV_FEATURES
+    cov_pv = foundation.COVARIATES + PV_COVARIATES
+
+    valid_rows, test_rows, seg = [], [], None
+    for name, w in config.WINDOWS.items():
+        ctx = json.loads((P / f"meta_{name}.json").read_text())["chronos_context_hours"]
+
+        # ---- validation: the decision
+        lg_before, _ = _fit_on_validation(dfp, w, FEATURES)
+        lg_after, _ = _fit_on_validation(dfp, w, feats_pv)
+        vdays = foundation.days_between(df, w.valid_start, w.test_start)
+        c0 = foundation.forecast(dfp, vdays, foundation.COVARIATES, ctx)
+        c1 = foundation.forecast(dfp, vdays, cov_pv, ctx)
+        ch_before, ch_after = _mape(c0, dfp.loc[c0.index, TARGET]), _mape(c1, dfp.loc[c1.index, TARGET])
+        valid_rows += [
+            {"window": name, "model": "LightGBM", "valid MAPE before %": lg_before, "valid MAPE with PV features %": lg_after},
+            {"window": name, "model": "Chronos-2", "valid MAPE before %": ch_before, "valid MAPE with PV features %": ch_after},
+        ]
+        print(f"{name:8s} validation  LightGBM {lg_before:.2f}% -> {lg_after:.2f}%   "
+              f"Chronos-2 {ch_before:.2f}% -> {ch_after:.2f}%", flush=True)
+
+        # ---- test: looked at once
+        rounds, _ = models.choose_rounds(dfp, w, feature_list=feats_pv)
+        lg_pv, last_model = models.rolling_lgbm(dfp, rounds, w, feature_list=feats_pv)
+        tdays = foundation.days_between(df, w.test_start, w.test_end)
+        ch_pv = foundation.forecast(dfp, tdays, cov_pv, ctx)
+
+        base = pd.read_parquet(P / f"pred_{name}.parquet")
+        base["ensemble"] = (base["lgbm"] + base["chronos_cov"]) / 2
+        morning = pd.read_parquet(P / f"morning_pred_{name}.parquet")
+        preds = (base[["official", "lgbm", "chronos_cov", "ensemble"]].join(morning[["official+bc"]])
+                 .join(lg_pv.rename("lgbm_pv")).join(ch_pv.rename("chronos_pv")).dropna())
+        preds["ensemble_pv"] = (preds["lgbm_pv"] + preds["chronos_pv"]) / 2
+        preds = preds[["official", "official+bc", "lgbm", "lgbm_pv", "chronos_cov", "chronos_pv", "ensemble", "ensemble_pv"]]
+        preds.to_parquet(P / f"pv_pred_{name}.parquet")
+
+        t = dfp.loc[preds.index]
+        y = t[TARGET]
+        mon = (preds.sub(y, axis=0).abs().div(y, axis=0) * 100).groupby(
+            t.index.tz_convert(config.TZ).strftime("%Y-%m")).mean()
+        for col in preds:
+            test_rows.append({
+                "window": name, "model": col, "test MAPE %": _mape(preds[col], y),
+                "months beating official": int((mon[col] < mon["official"]).sum()),
+                "months beating official+bc": int((mon[col] < mon["official+bc"]).sum()),
+                "months": len(mon),
+            })
+        for a, b in [("lgbm_pv", "lgbm"), ("chronos_pv", "chronos_cov"), ("ensemble_pv", "ensemble")]:
+            dm = evaluate.diebold_mariano(t, preds[a], preds[b])
+            test_rows.append({"window": name, "model": f"DM {a} vs {b}", "DM_stat": dm["DM_stat"], "p_value": dm["p_value"]})
+        if name == "main":
+            seg = evaluate.segment_table(t, preds)
+            imp = pd.Series(last_model.feature_importance("gain"), index=last_model.feature_name())
+            importance = (imp / imp.sum() * 100).sort_values(ascending=False).rename("share of gain %").to_frame()
+
+    diag = _pv_slope_by_year(df)
+    return diag, pd.DataFrame(valid_rows), pd.DataFrame(test_rows), seg, importance
