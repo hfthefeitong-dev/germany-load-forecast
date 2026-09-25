@@ -226,6 +226,17 @@ A balance responsible party or trader needs more than one number: how wide shoul
 
 ---
 
+## Live test: forecasts published before the outcome
+
+Backtests, however careful, are looked at repeatedly. The final test is prospective: every morning `python -m loadfc live` forecasts the next day before 12:00 (day-ahead gate closure, and hours before the official forecast appears), writes the forecast to [`live/forecasts/`](live/forecasts), and `tools/run-live.ps1` commits and pushes it. GitHub's commit timestamps show that each forecast existed before the outcome was known.
+
+- **Pre-registered.** Hypotheses, metrics and the evaluation date are fixed in [`live/PREREGISTRATION.md`](live/PREREGISTRATION.md), all settings in [`live/settings.json`](live/settings.json), both committed before the first live day.
+- **Nothing is backfilled.** A manifest per day records when the file was written and what data was available; late or missing days are excluded.
+- **It settles the open questions.** Whether the morning load (H2) and fine-tuning (H3) help is decided here, not in the backtest.
+- Interim scores: [`reports/LIVE.md`](reports/LIVE.md). The pre-registered evaluation follows after at least 60 on-time days, not before December 2026.
+
+---
+
 ## What are the errors worth?
 
 A balance responsible party (BRP) buys its forecast F on the day-ahead market at price P_da. Actual demand turns out to be A, and the difference is settled at the imbalance price reBAP:
@@ -282,6 +293,7 @@ python -m loadfc experiments     # ~8 min: reports/EXPERIMENTS.md
 python -m loadfc finetune        # ~40 min on GPU: reports/FINETUNE.md
 python -m loadfc pv              # ~15 min: reports/PV.md
 python -m loadfc probabilistic   # ~10 min: reports/PROBABILISTIC.md
+python -m loadfc live --dry-run  # one live forecast, without storing it
 ```
 
 `all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.
@@ -300,6 +312,8 @@ src/loadfc/
   cost.py         imbalance cost
   experiments.py  upper bound, bias correction, morning load, fine-tuning, PV capacity
   capacity.py     installed PV and battery capacity (Energy-Charts)
+  live.py         daily live forecasts and their evaluation
 tests/            leakage, calendar, bias-correction and cutoff tests
 reports/          RESULTS.md, EXPERIMENTS.md, results.json, figures
+live/             pre-registration, frozen settings, daily forecasts
 ```

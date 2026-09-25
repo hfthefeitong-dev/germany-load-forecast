@@ -12,6 +12,9 @@ Run the steps in this order, or all at once with `all`:
     python -m loadfc finetune   # fine-tune Chronos-2 (GPU, ~1 h), writes reports/FINETUNE.md
     python -m loadfc pv         # PV and battery capacity features, writes reports/PV.md
     python -m loadfc probabilistic  # quantile forecasts, writes reports/PROBABILISTIC.md
+    python -m loadfc live_setup     # freeze live settings (once)
+    python -m loadfc live [--dry-run]  # issue today's forecast for tomorrow
+    python -m loadfc live_eval      # score live forecasts, writes reports/LIVE.md
 
 Only `summary` writes to reports/. The earlier steps save intermediate
 results to data/processed/, so no step overwrites another step's output.
@@ -334,6 +337,35 @@ def probabilistic() -> None:
     print("\n".join(md))
 
 
+def live_setup() -> None:
+    """Freeze all live settings from the validation results (run once, before the first live day)."""
+    from . import live
+
+    print(json.dumps(live.setup(), indent=2))
+
+
+def live(*args) -> None:
+    """Issue today's forecast for tomorrow. `--dry-run` writes to data/processed/live_dryrun instead."""
+    from . import live as lv
+
+    print(json.dumps(lv.forecast(dry_run="--dry-run" in args), indent=2))
+
+
+def live_eval() -> None:
+    """Score all on-time live forecasts so far. Writes reports/LIVE.md."""
+    from . import live as lv
+
+    points, prob, days = lv.evaluate_live()
+    md = ["# Live forecasts", "",
+          f"On-time live forecasts with known actuals: {days} days. The pre-registered evaluation",
+          "(live/PREREGISTRATION.md) happens after at least 60 days.", ""]
+    if days:
+        md += ["## Point forecasts", "", points.round(2).to_markdown(index=False), "",
+               "## Probabilistic forecasts", "", prob.round(2).to_markdown(index=False), ""]
+    (config.REPORTS / "LIVE.md").write_text("\n".join(md))
+    print("\n".join(md))
+
+
 def all_steps() -> None:
     run()
     ablation()
@@ -343,8 +375,9 @@ def all_steps() -> None:
 
 if __name__ == "__main__":
     commands = {"download": download, "run": run, "ablation": ablation, "chronos": chronos,
-                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune, "pv": pv, "probabilistic": probabilistic}
-    if len(sys.argv) != 2 or sys.argv[1] not in commands:
+                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune, "pv": pv, "probabilistic": probabilistic,
+                "live_setup": live_setup, "live": live, "live_eval": live_eval}
+    if len(sys.argv) < 2 or sys.argv[1] not in commands:
         print(__doc__)
         sys.exit(1)
-    commands[sys.argv[1]]()
+    commands[sys.argv[1]](*sys.argv[2:])

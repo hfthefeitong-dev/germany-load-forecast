@@ -1,0 +1,22 @@
+{
+  "frozen_on": "2026-09-25",
+  "source": "validation period of the main window (2025-07-01 to 2025-09-30)",
+  "lgbm_rounds": 2122,
+  "lgbm_morning_rounds": 3546,
+  "chronos_context_hours": 8192,
+  "finetune_config": {
+    "finetune_mode": "lora",
+    "learning_rate": 1e-05,
+    "num_steps": 500
+  },
+  "finetune_context_hours": 2048,
+  "conformal_window_lgbm": 28,
+  "conformal_window_official": 42,
+  "official_bias_correction": {
+    "window_days": 14,
+    "alpha": 1.0,
+    "by_hour": true
+  },
+  "deadline_hour_local": 12,
+  "morning_until_hour_local": 8
+}
