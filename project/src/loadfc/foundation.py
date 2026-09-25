@@ -112,3 +112,31 @@ def choose_context(df: pd.DataFrame, w: config.Window) -> tuple[int, dict[int, f
         scores[hours] = float(((pred[ok] - y[ok]).abs() / y[ok]).mean() * 100)
         print(f"  {w.name} validation, context {hours} h: MAPE {scores[hours]:.2f}%")
     return min(scores, key=scores.get), scores
+
+
+def forecast_quantiles(
+    df: pd.DataFrame, days: list[pd.Timestamp], covariates: list[str], context_hours: int,
+    quantiles: list[float], batch: int = 16, cut_hour: int = 0,
+) -> pd.DataFrame:
+    """Like `forecast`, but returns one column per quantile level."""
+    pipe = _pipeline()
+    cols = [str(q) for q in quantiles]
+    out = []
+    for i in range(0, len(days), batch):
+        chunk = days[i : i + batch]
+        pairs = [_frames(df, d, covariates, context_hours, cut_hour) for d in chunk]
+        ctx = pd.concat([p[0] for p in pairs], ignore_index=True)
+        fut = pd.concat([p[1] for p in pairs], ignore_index=True)
+        kwargs = {"future_df": fut} if covariates else {}
+        pred = pipe.predict_df(
+            ctx, prediction_length=HORIZON, quantile_levels=list(quantiles),
+            id_column="id", timestamp_column="timestamp", target=TARGET, **kwargs,
+        )
+        pred.index = pd.to_datetime(pred["timestamp"]).dt.tz_localize("UTC").dt.as_unit("ns")
+        for d in chunk:
+            p = pred[pred["id"] == d.strftime("%Y-%m-%d")]
+            p = p[p.index.tz_convert(config.TZ).normalize() == d]
+            out.append(p[cols])
+    res = pd.concat(out).astype("float64")
+    res.columns = list(quantiles)
+    return res

@@ -6,6 +6,7 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 - Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the margin is **22 % in the main period but only 8 % and not significant in the backtest**.
 - Issuing the forecast at 10:00 on the day before and using **that morning's published load**, still well before the official forecast appears, raises the margin over the stronger benchmark to **23 % and 15 %, significant in both periods**.
 - Forecast errors are translated into **imbalance costs in euros** using the German imbalance price reBAP.
+- **Probabilistic forecasts** give well-calibrated 80 % and 90 % intervals; in the main period their pinball loss is 23 % lower than that of the official forecast with the same kind of intervals.
 
 | MAPE | Main test: Oct 2025 – Sep 2026 | Backtest: Jan – Sep 2025 |
 |---|---|---|
@@ -17,7 +18,7 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 | **Ensemble: LightGBM + Chronos-2** | **2.70 %** | **2.55 %** |
 | Ensemble, issued 10:00 on D-1 with that morning's load | 2.64 % | 2.43 % |
 
-Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) , [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning) and [`reports/PV.md`](reports/PV.md) (capacity features).
+Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) , [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning), [`reports/PV.md`](reports/PV.md) (capacity features) and [`reports/PROBABILISTIC.md`](reports/PROBABILISTIC.md) (quantile forecasts).
 
 ---
 
@@ -201,6 +202,30 @@ A diagnostic in the same report also contradicts an earlier assumption of this p
 
 ---
 
+## Probabilistic forecasts: honest intervals
+
+A balance responsible party or trader needs more than one number: how wide should the safety margin be? The project forecasts seven quantiles (P5 to P95) and scores them with the **mean pinball loss**, which rewards intervals that are both narrow and honest ([`reports/PROBABILISTIC.md`](reports/PROBABILISTIC.md)).
+
+- **Conformal intervals**: a point forecast plus rolling empirical quantiles of its own recent errors, per hour of the day, using only errors known at forecast time (up to D-2).
+- **Chronos-2** outputs quantiles natively.
+- **Benchmark**: the official forecast with the same conformal intervals, its look-back window also tuned on validation.
+- Look-back windows (14, 28 or 42 days) and the choice of method are made on validation. Both periods chose the **average of LightGBM + conformal and Chronos-2**.
+
+![Probabilistic forecast, week of 20 April 2026](reports/figures/08_probabilistic_week.png)
+
+| | Main | Backtest |
+|---|---|---|
+| Mean pinball loss, benchmark | 547 MW | 439 MW |
+| Mean pinball loss, chosen method | **419 MW** (23 % lower, p < 0.001) | 416 MW (5 % lower, p = 0.48) |
+| 80 % interval contains the actual: chosen / benchmark | **80.1 %** / 74.2 % | **78.1 %** / 66.7 % |
+| 90 % interval contains the actual: chosen / benchmark | **90.0 %** / 82.7 % | **87.8 %** / 76.3 % |
+
+- **In the main period the intervals are both better and almost perfectly calibrated**: 80.1 % of actual values fall inside the nominal 80 % interval, 90.0 % inside the nominal 90 % one.
+- **In the backtest the gain is small and not significant**, the familiar pattern: LightGBM lacks history there. Chronos-2 alone would have been better (15 % lower loss), but on validation it was nearly tied with the average (671 vs 664 MW) and lost narrowly.
+- **Intervals built from recent errors alone are too narrow.** All conformal variants, including the benchmark, cover only 67 to 83 % where 80 or 90 % is promised: a few weeks of errors do not anticipate a regime change such as a cold snap or the Christmas lull. Chronos-2's model-based intervals are close to nominal, and averaging the two yields well-calibrated intervals.
+
+---
+
 ## What are the errors worth?
 
 A balance responsible party (BRP) buys its forecast F on the day-ahead market at price P_da. Actual demand turns out to be A, and the difference is settled at the imbalance price reBAP:
@@ -238,7 +263,7 @@ This is a thought experiment, not a market simulation: if every BRP forecast bet
 - **The morning-load variant rests on a publication delay measured once.** A production system would have to check each morning which hours are actually published.
 - **Weather is represented by one city per state.** Weighting radiation by installed PV capacity (from the Marktstammdatenregister) would model behind-the-meter PV more directly, although the upper-bound experiment suggests little headroom from weather.
 - **Actual load values may be revised** after first publication. The lag features use final values, which a real-time forecaster would only have in provisional form.
-- **Point forecasts only.** A trader or BRP would also want uncertainty (quantiles); Chronos-2 produces them natively.
+- **Probabilistic evaluation covers seven quantiles** and a single interval method per family; conformal intervals conditioned on weather or day type might be sharper.
 - **No gating between models.** Using LightGBM on holidays and the ensemble elsewhere looks attractive in the tables, but choosing that rule after seeing the test results would be overfitting. It would need its own validation period.
 
 ---
@@ -256,6 +281,7 @@ python -m loadfc all             # ~5 min: LightGBM, ablation, Chronos-2, report
 python -m loadfc experiments     # ~8 min: reports/EXPERIMENTS.md
 python -m loadfc finetune        # ~40 min on GPU: reports/FINETUNE.md
 python -m loadfc pv              # ~15 min: reports/PV.md
+python -m loadfc probabilistic   # ~10 min: reports/PROBABILISTIC.md
 ```
 
 `all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.

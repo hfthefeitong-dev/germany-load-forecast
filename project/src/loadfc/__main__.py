@@ -11,6 +11,7 @@ Run the steps in this order, or all at once with `all`:
     python -m loadfc experiments  # exploration, writes reports/EXPERIMENTS.md
     python -m loadfc finetune   # fine-tune Chronos-2 (GPU, ~1 h), writes reports/FINETUNE.md
     python -m loadfc pv         # PV and battery capacity features, writes reports/PV.md
+    python -m loadfc probabilistic  # quantile forecasts, writes reports/PROBABILISTIC.md
 
 Only `summary` writes to reports/. The earlier steps save intermediate
 results to data/processed/, so no step overwrites another step's output.
@@ -311,6 +312,28 @@ def pv() -> None:
     print("\n".join(md))
 
 
+def probabilistic() -> None:
+    """Probabilistic forecasts: quantiles, coverage, pinball loss. Writes reports/PROBABILISTIC.md."""
+    from . import experiments as ex
+
+    select, test, reliability, plot = ex.probabilistic()
+    if plot is not None:
+        t, q, official, method = plot
+        plots.fan_chart(t, q, official, method, "2026-04-20")
+    md = [
+        "# Probabilistic forecasts", "",
+        "Quantiles P5, P10, P25, P50, P75, P90, P95. Mean pinball loss (lower is better) rewards forecasts",
+        "that are sharp and honest; coverage shows whether an 80 % or 90 % interval really contains the",
+        "actual value that often. Look-back windows and the choice of method are made on validation.", "",
+        "## Selection on validation", "", select.round(2).to_markdown(index=False), "",
+        "## Test periods, looked at once", "", test.round(2).to_markdown(index=False), "",
+        "## Reliability: share of actual values below each quantile (ideal = the quantile level)", "",
+        reliability.round(1).to_markdown(index=False), "",
+    ]
+    (config.REPORTS / "PROBABILISTIC.md").write_text("\n".join(md))
+    print("\n".join(md))
+
+
 def all_steps() -> None:
     run()
     ablation()
@@ -320,7 +343,7 @@ def all_steps() -> None:
 
 if __name__ == "__main__":
     commands = {"download": download, "run": run, "ablation": ablation, "chronos": chronos,
-                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune, "pv": pv}
+                "summary": summary, "all": all_steps, "experiments": experiments, "finetune": finetune, "pv": pv, "probabilistic": probabilistic}
     if len(sys.argv) != 2 or sys.argv[1] not in commands:
         print(__doc__)
         sys.exit(1)

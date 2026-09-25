@@ -44,16 +44,14 @@ def segment_table(df: pd.DataFrame, preds: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("segment")
 
 
-def diebold_mariano(df: pd.DataFrame, pred_a: pd.Series, pred_b: pd.Series, lags: int = 7) -> dict:
-    """Is model A's absolute error significantly different from model B's?
+def dm_on_losses(loss_a: pd.Series, loss_b: pd.Series, date: pd.Series, lags: int = 7) -> dict:
+    """Diebold-Mariano test on any per-hour losses (absolute error, pinball loss, ...).
 
-    Hourly errors are strongly autocorrelated, so the test is run on daily
-    mean absolute errors with a Newey-West variance (HAC, `lags` days).
-    A negative statistic means A is more accurate than B.
+    Hourly losses are strongly autocorrelated, so the test is run on daily
+    mean losses with a Newey-West variance (HAC, `lags` days).
+    A negative statistic means A has the lower loss.
     """
-    a = (pred_a - df[TARGET]).abs().groupby(df["date"]).mean()
-    b = (pred_b - df[TARGET]).abs().groupby(df["date"]).mean()
-    d = (a - b).dropna()
+    d = (loss_a.groupby(date).mean() - loss_b.groupby(date).mean()).dropna()
     n = len(d)
     dc = d - d.mean()
     var = np.sum(dc**2) / n
@@ -61,4 +59,14 @@ def diebold_mariano(df: pd.DataFrame, pred_a: pd.Series, pred_b: pd.Series, lags
         var += 2 * (1 - k / (lags + 1)) * np.sum(dc.iloc[k:].to_numpy() * dc.iloc[:-k].to_numpy()) / n
     stat = d.mean() / np.sqrt(var / n)
     p = 2 * (1 - stats.norm.cdf(abs(stat)))
-    return {"days": n, "mean_daily_MAE_diff_MW": float(d.mean()), "DM_stat": float(stat), "p_value": float(p)}
+    return {"days": n, "mean_daily_loss_diff": float(d.mean()), "DM_stat": float(stat), "p_value": float(p)}
+
+
+def diebold_mariano(df: pd.DataFrame, pred_a: pd.Series, pred_b: pd.Series, lags: int = 7) -> dict:
+    """Is model A's absolute error significantly different from model B's?
+
+    A negative statistic means A is more accurate than B.
+    """
+    r = dm_on_losses((pred_a - df[TARGET]).abs(), (pred_b - df[TARGET]).abs(), df["date"], lags)
+    r["mean_daily_MAE_diff_MW"] = r.pop("mean_daily_loss_diff")
+    return r

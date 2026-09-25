@@ -129,3 +129,20 @@ def feature_importance(model) -> None:
     ax.barh(imp.index, imp.values / imp.sum() * 100, color="#1b9e77")
     ax.set(xlabel="share of total gain [%]", title="LightGBM feature importance")
     _save(fig, "06_feature_importance.png")
+
+
+def fan_chart(test: pd.DataFrame, q: pd.DataFrame, official: pd.Series, method: str, start: str) -> None:
+    """Probabilistic forecast for one week: median, 80 % and 90 % bands, actual, official."""
+    a = pd.Timestamp(start, tz=config.TZ)
+    m = (q.index >= a) & (q.index < a + pd.Timedelta(days=7))
+    loc = q.index[m].tz_convert(config.TZ)
+    qq = q[m] / 1000
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.fill_between(loc, qq[0.05], qq[0.95], color="#1b9e77", alpha=0.18, label="90 % interval")
+    ax.fill_between(loc, qq[0.1], qq[0.9], color="#1b9e77", alpha=0.30, label="80 % interval")
+    ax.plot(loc, qq[0.5], color="#1b9e77", lw=1.4, label=f"median: {method}")
+    ax.plot(loc, test.loc[m, TARGET] / 1000, color=COLORS["actual"], lw=2, label="actual")
+    ax.plot(loc, official[m] / 1000, color=COLORS["official"], lw=1.3, label="official forecast")
+    ax.set(ylabel="load [GW]", title=f"Probabilistic forecast, week of {start}")
+    ax.legend(fontsize=8, ncol=2)
+    _save(fig, "08_probabilistic_week.png")

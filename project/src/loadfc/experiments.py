@@ -15,6 +15,7 @@ import itertools
 import json
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 
 from . import capacity, config, evaluate, features, foundation, models, weather
@@ -492,3 +493,149 @@ def pv_capacity() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFram
 
     diag = _pv_slope_by_year(df)
     return diag, pd.DataFrame(valid_rows), pd.DataFrame(test_rows), seg, importance
+
+
+
+# ============================================ 6. probabilistic forecasts
+# Methods
+#   chronos            Chronos-2 native quantiles (zero-shot, same covariates)
+#   <point>+conformal  a point forecast plus rolling empirical quantiles of its
+#                      own recent errors, per hour of the day, using only errors
+#                      known at forecast time (up to D-2). A simple form of
+#                      conformal prediction.
+#   avg(...)           quantile averaging of two methods
+# Benchmark: the official forecast + conformal, with its window also chosen
+# on validation, so the opponent gets the same treatment.
+#
+# Pre-registered: the look-back window of every conformal method and the
+# choice among our methods are made on validation by mean pinball loss.
+
+QUANTILES = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95]
+CONFORMAL_WINDOWS = [14, 28, 42]
+MIN_HISTORY_DAYS = 44  # validation days scored only once every window has full history
+
+
+def pinball(y: pd.Series, q: pd.DataFrame) -> pd.Series:
+    """Mean pinball (quantile) loss per row, averaged over the quantile levels, in MW.
+
+    For level tau, under-forecasting costs tau per MW and over-forecasting
+    (1 - tau). It rewards forecasts that are both sharp and honest: a too
+    narrow interval is punished when reality falls outside it.
+    """
+    losses = []
+    for tau in q.columns:
+        d = y - q[tau]
+        losses.append(np.maximum(tau * d, (tau - 1) * d))
+    return pd.concat(losses, axis=1).mean(axis=1)
+
+
+def conformal(point: pd.Series, actual: pd.Series, date: pd.Series, hour: pd.Series,
+              window_days: int, quantiles: list[float] = QUANTILES) -> pd.DataFrame:
+    """Point forecast + empirical quantiles of its residuals over the last `window_days` known days.
+
+    Residuals are grouped by hour of the day, because errors at 3 am and at
+    noon behave differently. `shift(2)` on a gap-free daily index means the
+    newest residuals used for day D are from day D-2.
+    """
+    resid = actual - point
+    days = pd.date_range(date.min(), date.max(), freq="D")
+    table = resid.groupby([date, hour]).mean().unstack().reindex(days)
+    shifted = table.shift(2)
+    key = pd.Series(list(zip(date, hour)), index=point.index)
+    out = {}
+    for tau in quantiles:
+        qt = shifted.rolling(window_days, min_periods=window_days // 2).quantile(tau)
+        out[tau] = point.to_numpy() + key.map(qt.stack()).astype("float64").to_numpy()
+    return pd.DataFrame(out, index=point.index)
+
+
+def _prob_scores(y: pd.Series, q: pd.DataFrame) -> dict:
+    ok = y.notna() & q.notna().all(axis=1)
+    y, q = y[ok], q[ok]
+    return {
+        "mean pinball MW": float(pinball(y, q).mean()),
+        "coverage 80 % (P10-P90)": float(((y >= q[0.1]) & (y <= q[0.9])).mean() * 100),
+        "coverage 90 % (P5-P95)": float(((y >= q[0.05]) & (y <= q[0.95])).mean() * 100),
+        "width 80 % MW": float((q[0.9] - q[0.1]).mean()),
+        "median MAPE %": float(((q[0.5] - y).abs() / y).mean() * 100),
+        "hours": int(ok.sum()),
+    }
+
+
+def probabilistic():
+    df = pd.read_parquet(P / "features.parquet")
+    select_rows, test_rows, reliability_rows, plot = [], [], [], None
+    for name, w in config.WINDOWS.items():
+        ctx = json.loads((P / f"meta_{name}.json").read_text())["chronos_context_hours"]
+        valid = _validation_forecasts(df, name, w)
+        test = pd.read_parquet(P / f"pred_{name}.parquet")
+        test["ensemble"] = (test["lgbm"] + test["chronos_cov"]) / 2
+        points = ["lgbm", "ensemble", "official"]
+        both = pd.concat([valid[points], test[points].dropna()]).sort_index()
+        both = both[~both.index.duplicated(keep="last")]
+        d = df.loc[both.index]
+        date = pd.Series(d["date"].to_numpy(), index=both.index)
+        hour = pd.Series(both.index.tz_convert(config.TZ).hour, index=both.index)
+        y_all = d[TARGET]
+
+        vdays = foundation.days_between(df, w.valid_start, w.test_start)
+        tdays = foundation.days_between(df, w.test_start, w.test_end)
+        chronos_q = pd.concat([
+            foundation.forecast_quantiles(df, vdays, foundation.COVARIATES, ctx, QUANTILES),
+            foundation.forecast_quantiles(df, tdays, foundation.COVARIATES, ctx, QUANTILES),
+        ]).sort_index()
+
+        # ---- candidates, each as a quantile DataFrame over validation + test
+        conf = {(p, wd): conformal(both[p], y_all, date, hour, wd) for p in points for wd in CONFORMAL_WINDOWS}
+        local = both.index.tz_convert(config.TZ)
+        is_valid = (local >= w.valid_start) & (local < w.test_start)
+        scored = is_valid & (local >= w.valid_start + pd.Timedelta(days=MIN_HISTORY_DAYS))
+        vidx = both.index[scored]
+
+        def vscore(q):
+            q = q.reindex(vidx)
+            return _prob_scores(y_all.reindex(vidx), q)["mean pinball MW"]
+
+        best_w = {}
+        for p in points:
+            scores = {wd: vscore(conf[(p, wd)]) for wd in CONFORMAL_WINDOWS}
+            best_w[p] = min(scores, key=scores.get)
+            for wd, sc in scores.items():
+                select_rows.append({"window": name, "method": f"{p}+conformal", "look-back days": wd, "valid mean pinball MW": sc})
+
+        cands = {
+            "official+conformal (benchmark)": conf[("official", best_w["official"])],
+            "lgbm+conformal": conf[("lgbm", best_w["lgbm"])],
+            "ensemble+conformal": conf[("ensemble", best_w["ensemble"])],
+            "chronos (native)": chronos_q.reindex(both.index),
+        }
+        cands["avg(lgbm+conformal, chronos)"] = (cands["lgbm+conformal"] + cands["chronos (native)"]) / 2
+        for m in ["chronos (native)", "avg(lgbm+conformal, chronos)"]:
+            select_rows.append({"window": name, "method": m, "look-back days": None, "valid mean pinball MW": vscore(cands[m])})
+        ours = {k: vscore(v) for k, v in cands.items() if "benchmark" not in k}
+        chosen = min(ours, key=ours.get)
+        select_rows.append({"window": name, "method": f"CHOSEN: {chosen}", "look-back days": None, "valid mean pinball MW": ours[chosen]})
+        print(f"{name:8s} chosen on validation: {chosen}; windows {best_w}", flush=True)
+
+        # ---- test, once
+        tidx = both.index[local >= w.test_start]
+        y = y_all.reindex(tidx)
+        bench = cands["official+conformal (benchmark)"].reindex(tidx)
+        for m, q in cands.items():
+            q = q.reindex(tidx)
+            sc = _prob_scores(y, q)
+            sc["skill vs benchmark %"] = (1 - sc["mean pinball MW"] / _prob_scores(y, bench)["mean pinball MW"]) * 100
+            test_rows.append({"window": name, "method": m + (" <- chosen" if m == chosen else ""), **sc})
+            if m in (chosen, "official+conformal (benchmark)"):
+                ok = y.notna() & q.notna().all(axis=1)
+                reliability_rows.append({"window": name, "method": m,
+                                         **{f"share below P{int(t * 100)} %": float((y[ok] < q.loc[ok, t]).mean() * 100) for t in QUANTILES}})
+        tq = cands[chosen].reindex(tidx)
+        ok = y.notna() & tq.notna().all(axis=1) & bench.notna().all(axis=1)
+        t = df.loc[tidx[ok]]
+        dm = evaluate.dm_on_losses(pinball(y[ok], tq[ok]), pinball(y[ok], bench[ok]), t["date"])
+        test_rows.append({"window": name, "method": f"DM {chosen} vs benchmark (daily mean pinball)",
+                          "mean pinball MW": None, "DM_stat": dm["DM_stat"], "p_value": dm["p_value"]})
+        if name == "main":
+            plot = (t, tq[ok], df.loc[tidx[ok], "load_official"], chosen)
+    return (pd.DataFrame(select_rows), pd.DataFrame(test_rows), pd.DataFrame(reliability_rows), plot)
