@@ -171,6 +171,38 @@ def forecast(dry_run: bool = False) -> dict:
     if out.exists():
         raise SystemExit(f"{out.name} already exists; stored forecasts are never overwritten")
 
+    # Two schedulers could start at the same moment after the computer wakes up.
+    # The lock makes sure only one of them issues the forecast.
+    lock = out.with_suffix(".lock")
+    _acquire(lock)
+    try:
+        return _issue(s, now, today, target, out, dry_run)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _acquire(lock) -> None:
+    """Create the lock file atomically; fail if another run holds it.
+
+    A lock older than an hour can only come from a crashed run and is removed.
+    """
+    import os
+    import time
+
+    if lock.exists() and time.time() - lock.stat().st_mtime > 3600:
+        lock.unlink()
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise SystemExit(f"another run for {lock.stem} is in progress")
+    os.write(fd, str(os.getpid()).encode())
+    os.close(fd)
+
+
+def _issue(s: dict, now: pd.Timestamp, today: pd.Timestamp, target: pd.Timestamp, out, dry_run: bool) -> dict:
+    """Compute, write and describe one forecast. Called with the lock held."""
+    if out.exists():  # another run may have finished while this one waited
+        raise SystemExit(f"{out.name} already exists; stored forecasts are never overwritten")
     refresh_data()
     df = _frame(target)
     dfm = features.add_morning_load(df)
