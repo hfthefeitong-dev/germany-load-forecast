@@ -15,9 +15,8 @@ only a few hours and it would leak information. It is not used here.
 """
 
 import pandas as pd
-import requests
 
-from . import config
+from . import config, net
 
 URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 VARIABLES = ("temperature_2m", "shortwave_radiation", "cloud_cover")
@@ -33,9 +32,7 @@ def _fetch_block(start: str, end: str, url: str = URL, suffix: str = f"_{LEAD}")
         "hourly": ",".join(f"{v}{suffix}" for v in VARIABLES),
         "timezone": "UTC",
     }
-    r = requests.get(url, params=params, timeout=180)
-    r.raise_for_status()
-    payload = r.json()
+    payload = net.get_json(url, params=params, timeout=180)
 
     frames = []
     for state, loc in zip(config.STATES, payload):

@@ -16,9 +16,8 @@ operators and published on SMARD by 18:00 on the day before delivery.
 import time
 
 import pandas as pd
-import requests
 
-from . import config
+from . import config, net
 
 BASE = "https://www.smard.de/app/chart_data"
 
@@ -30,9 +29,7 @@ SERIES = {
 
 
 def _get(url: str) -> dict:
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    return net.get_json(url, timeout=60)
 
 
 def fetch(name: str, start: pd.Timestamp) -> pd.Series:
