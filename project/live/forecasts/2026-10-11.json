@@ -1,0 +1,30 @@
+{
+  "target_date": "2026-10-11",
+  "started_at_local": "2026-10-10T11:17:11.997834+02:00",
+  "issued_at_utc": "2026-10-10T09:17:28.853903+00:00",
+  "issued_at_local": "2026-10-10T11:17:28.853903+02:00",
+  "deadline_local": "2026-10-10T12:00:00+02:00",
+  "on_time": true,
+  "dry_run": false,
+  "data": {
+    "last_load_hour_local": "2026-10-10 09:00:00+02:00",
+    "yesterday_complete (day D-2)": true,
+    "morning_complete_until_08": true,
+    "weather_for_target_complete": true
+  },
+  "variants_missing": [],
+  "models": {
+    "lgbm_month": "2026-10",
+    "chronos_ft": true
+  },
+  "code_commit": "5746f06afd30c4e165b043ccb493798a5656bdec",
+  "code_uncommitted_changes": false,
+  "versions": {
+    "python": "3.12.3",
+    "lightgbm": "4.7.0",
+    "pandas": "3.0.6",
+    "torch": "2.11.0+cu128",
+    "chronos": "2.3.2"
+  },
+  "sha256_csv": "82222e443567646d81d7a9b19ab134fede77bc24c44e361d0d0a2cd2f73e8e89"
+}
