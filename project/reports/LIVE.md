@@ -7,21 +7,21 @@ On-time live forecasts with known actuals: 22 days. The pre-registered evaluatio
 
 | model               |   hours |   MAPE % |
 |:--------------------|--------:|---------:|
-| official            |     515 |     3.4  |
-| official+bc         |     515 |     3.09 |
-| lgbm                |     515 |     2.57 |
-| chronos             |     515 |     2.68 |
-| ensemble            |     515 |     2.4  |
-| lgbm_morning        |     515 |     2.24 |
-| chronos_morning     |     515 |     2.64 |
-| ensemble_morning    |     515 |     2.28 |
-| chronos_ft          |     515 |     2.3  |
-| ensemble_ft         |     515 |     2.28 |
-| ensemble_ft_morning |     515 |     2.11 |
+| official            |     529 |     3.35 |
+| official+bc         |     529 |     3.06 |
+| lgbm                |     529 |     2.52 |
+| chronos             |     529 |     2.65 |
+| ensemble            |     529 |     2.36 |
+| lgbm_morning        |     529 |     2.2  |
+| chronos_morning     |     529 |     2.61 |
+| ensemble_morning    |     529 |     2.23 |
+| chronos_ft          |     529 |     2.29 |
+| ensemble_ft         |     529 |     2.25 |
+| ensemble_ft_morning |     529 |     2.07 |
 
 ## Probabilistic forecasts
 
 | method                               |   mean pinball MW |   coverage 80 % (P10-P90) |   coverage 90 % (P5-P95) |   width 80 % MW |   median MAPE % |   hours |
 |:-------------------------------------|------------------:|--------------------------:|-------------------------:|----------------:|----------------:|--------:|
-| avg(LightGBM + conformal, Chronos-2) |            350.03 |                     82.91 |                    89.32 |         4171.35 |            2.29 |     515 |
-| official + conformal (benchmark)     |            512.86 |                     74.56 |                    80.97 |         4204.55 |            3.08 |     515 |
+| avg(LightGBM + conformal, Chronos-2) |            345.19 |                     83.55 |                    89.79 |         4165.93 |            2.24 |     529 |
+| official + conformal (benchmark)     |            507.32 |                     74.86 |                    81.1  |         4222.79 |            3.04 |     529 |
