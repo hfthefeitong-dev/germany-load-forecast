@@ -57,6 +57,15 @@ def _midnight(ts: pd.Timestamp) -> pd.Timestamp:
     return pd.Timestamp(ts.year, ts.month, ts.day, tz=config.TZ)
 
 
+def _deadline(today: pd.Timestamp, hour: int) -> pd.Timestamp:
+    # Wall-clock time: midnight + 12 h is only 11:00 on the 25-hour day in October.
+    return pd.Timestamp(today.year, today.month, today.day, hour, tz=config.TZ)
+
+
+def _previous_day(today: pd.Timestamp) -> pd.Timestamp:
+    return _midnight(today - pd.Timedelta(hours=12))  # DST-safe
+
+
 # ------------------------------------------------------------------- setup
 def setup() -> dict:
     """Freeze every choice from the main window's validation period."""
@@ -214,7 +223,7 @@ def _issue(s: dict, now: pd.Timestamp, today: pd.Timestamp, target: pd.Timestamp
     last_load = local[known].max()
     today_rows = df["date"] == today.tz_localize(None)
     morning_complete = bool((known & today_rows & (df["hour"] < s["morning_until_hour_local"])).sum() >= s["morning_until_hour_local"])
-    yesterday_complete = bool((known & (df["date"] == (today - pd.Timedelta(days=1)).tz_localize(None))).sum() >= 23)
+    yesterday_complete = bool((known & (df["date"] == _previous_day(today).tz_localize(None))).sum() >= 23)
     weather_complete = bool(df.loc[rows, "temp"].notna().all())
 
     res = pd.DataFrame(index=rows)
@@ -265,6 +274,7 @@ def _issue(s: dict, now: pd.Timestamp, today: pd.Timestamp, target: pd.Timestamp
     # The issue time is when the file exists, not when the run started: a run that
     # starts at 11:58 and finishes at 12:01 is late.
     issued = _now()
+    deadline = _deadline(today, s["deadline_hour_local"])
 
     commit, dirty = _git_commit()
     import chronos
@@ -274,8 +284,8 @@ def _issue(s: dict, now: pd.Timestamp, today: pd.Timestamp, target: pd.Timestamp
         "started_at_local": now.isoformat(),
         "issued_at_utc": issued.tz_convert("UTC").isoformat(),
         "issued_at_local": issued.isoformat(),
-        "deadline_local": (today + pd.Timedelta(hours=s["deadline_hour_local"])).isoformat(),
-        "on_time": bool(issued < today + pd.Timedelta(hours=s["deadline_hour_local"])),
+        "deadline_local": deadline.isoformat(),
+        "on_time": bool(issued < deadline),
         "dry_run": dry_run,
         "data": {
             "last_load_hour_local": str(last_load),
