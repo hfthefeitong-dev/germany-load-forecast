@@ -1,4 +1,4 @@
-# 代码在 WSL 里跑，统一 LF。CRLF 会让 shell 脚本报 "bad interpreter: /bin/bash^M"
+# The code runs in WSL, so use LF everywhere: CRLF makes shell scripts fail with "bad interpreter: /bin/bash^M".
 * text=auto eol=lf
 *.ps1 text eol=crlf
 *.png binary

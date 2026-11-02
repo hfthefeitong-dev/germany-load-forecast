@@ -3,7 +3,7 @@
 Day-ahead forecasts of electricity demand for Germany, benchmarked against the official forecast that the four transmission system operators (TSOs) publish every day. The models use **less information** than the official forecaster, and every modelling choice is fixed on validation data before the test periods are touched.
 
 - An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast as published and beats it in all 21 test months**, across two separate out-of-sample periods.
-- Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the margin is **22 % in the main period but only 8 % and not significant in the backtest**.
+- Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the margin is **22 % in the main period but only 8 % and not significant in the backtest** (with the same correction applied to the ensemble).
 - Issuing the forecast at 10:00 on the day before and using **that morning's published load**, still well before the official forecast appears, raises the margin over the stronger benchmark to **23 % and 15 %, significant in both periods**.
 - Forecast errors are translated into **imbalance costs in euros** using the German imbalance price reBAP.
 - **Probabilistic forecasts** give well-calibrated 80 % and 90 % intervals; in the main period their pinball loss is 23 % lower than that of the official forecast with the same kind of intervals.
@@ -18,19 +18,19 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 | **Ensemble: LightGBM + Chronos-2** | **2.70 %** | **2.55 %** |
 | Ensemble, issued 10:00 on D-1 with that morning's load | 2.64 % | 2.43 % |
 
-Full tables: [`reports/RESULTS.md`](reports/RESULTS.md) (main pipeline) and [`reports/EXPERIMENTS.md`](reports/EXPERIMENTS.md) (upper bound, bias correction, morning load) , [`reports/FINETUNE.md`](reports/FINETUNE.md) (fine-tuning), [`reports/PV.md`](reports/PV.md) (capacity features) and [`reports/PROBABILISTIC.md`](reports/PROBABILISTIC.md) (quantile forecasts).
+Full tables: [`project/reports/RESULTS.md`](project/reports/RESULTS.md) (main pipeline), [`project/reports/EXPERIMENTS.md`](project/reports/EXPERIMENTS.md) (upper bound, bias correction, morning load), [`project/reports/FINETUNE.md`](project/reports/FINETUNE.md) (fine-tuning), [`project/reports/PV.md`](project/reports/PV.md) (capacity features) and [`project/reports/PROBABILISTIC.md`](project/reports/PROBABILISTIC.md) (quantile forecasts).
 
 ---
 
 ## The finding that started it
 
-![Official forecast error vs sunshine](reports/figures/02_official_error_vs_sun.png)
+![Official forecast error vs sunshine](project/reports/figures/02_official_error_vs_sun.png)
 
 At midday the official forecast's error rises almost linearly with solar radiation: it under-forecasts on dull days and over-forecasts by up to 20 % on sunny ones. The likely cause is **behind-the-meter rooftop PV**. When the sun shines, households and businesses consume their own solar power, and the load seen by the grid drops. The effect is strongest on weekends and public holidays, when baseline demand is low. On sunny weekend and holiday middays the official forecast's error is 8.6 % in the main test period and 9.5 % in the backtest; the ensemble's is 2.8 % and 3.3 %.
 
 The largest official errors of the year were on **Sunday 26 April 2026** and **Labour Day, 1 May 2026**, both clear-sky days across all of Germany, with the forecast about 9 GW (24 %) too high.
 
-![Week of 20 April 2026](reports/figures/04_week_sunny_sunday.png)
+![Week of 20 April 2026](project/reports/figures/04_week_sunny_sunday.png)
 
 ---
 
@@ -46,7 +46,7 @@ The official forecast for day D is published on day D-1 (by 18:00, per [SMARD](h
 | Hyperparameters | chosen on a validation period **before** each test period | test data is never used for tuning |
 | Model training | retrained monthly on data known at that time | the model never sees the month it predicts |
 
-The rule is enforced by automated tests ([`tests/`](tests)): they scramble the load of days D-1 and D and assert that nothing the model sees for day D changes, and confirm that scrambling day D-2 *does* change it.
+The rule is enforced by automated tests ([`project/tests/`](project/tests)): they scramble the load of days D-1 and D and assert that nothing the model sees for day D changes, and confirm that scrambling day D-2 *does* change it.
 
 Two traps found along the way:
 
@@ -70,11 +70,11 @@ All sources are free and need no registration. History starts in January 2024, w
 
 ## Method
 
-**Features** ([`features.py`](src/loadfc/features.py)). Hour, weekday, season; the *share of the population* on a public holiday (holidays differ by state, e.g. Epiphany only in BW, BY, ST); bridge days; the Christmas period; load at the same hour 2, 7 and 14 days earlier; population-weighted temperature, radiation and cloud cover, plus radiation in the PV-heavy south.
+**Features** ([`features.py`](project/src/loadfc/features.py)). Hour, weekday, season; the *share of the population* on a public holiday (holidays differ by state, e.g. Epiphany only in BW, BY, ST); bridge days; the Christmas period; load at the same hour 2, 7 and 14 days earlier; population-weighted temperature, radiation and cloud cover, plus radiation in the PV-heavy south.
 
-**LightGBM** ([`models.py`](src/loadfc/models.py)). Gradient-boosted trees with an L1 objective, retrained at the start of every test month on all data known at that time. The number of trees is chosen by early stopping on the validation period.
+**LightGBM** ([`models.py`](project/src/loadfc/models.py)). Gradient-boosted trees with an L1 objective, retrained at the start of every test month on all data known at that time. The number of trees is chosen by early stopping on the validation period.
 
-**Chronos-2** ([`foundation.py`](src/loadfc/foundation.py)). Amazon's 120M-parameter time series foundation model (2025, Apache-2.0), used **zero-shot**: it has never been trained on German load. It receives the load history and the same known-future covariates as LightGBM. The context length (12 weeks or the maximum of about 11 months) is chosen on the validation period; both periods chose the longer one.
+**Chronos-2** ([`foundation.py`](project/src/loadfc/foundation.py)). Amazon's 120M-parameter time series foundation model (2025, Apache-2.0), used **zero-shot**: it has never been trained on German load. It receives the load history and the same known-future covariates as LightGBM. The context length (12 weeks or the maximum of about 11 months) is chosen on the validation period; both periods chose the longer one.
 
 **Ensemble.** The plain average of LightGBM and Chronos-2. Equal weights involve no tuning, so evaluating it on the test periods stays fair.
 
@@ -89,15 +89,15 @@ All sources are free and need no registration. History starts in January 2024, w
 
 ## Results
 
-![Month-by-month error](reports/figures/07_monthly_mape.png)
+![Month-by-month error](project/reports/figures/07_monthly_mape.png)
 
 **The ensemble is the only model that beats the published official forecast in every month.** Each component fails somewhere:
 
 - **LightGBM needs history.** At the start of the backtest it had less than a year of training data and little winter. Early stopping on the validation period kept only 155 trees, and its January 2025 error was 6.6 %. Over the backtest its advantage over the official forecast is not statistically significant (p = 0.18). With 20 months of history in the main period it is strong.
 - **Chronos-2 needs no training data but struggles with holidays.** Zero-shot, it is the best single model in the backtest. On public holidays, bridge days and at Christmas it is much worse than LightGBM, because holidays are rare in its context window. Even 8,192 hours (341 days) do not reach back to last year's Christmas.
-- **Averaging them is the safe choice, not always the best one.** The ensemble beats both components in 12 of 21 months, and in the backtest Chronos-2 alone is slightly better overall. What the ensemble adds is robustness: the two models rarely fail in the same month.
+- **Averaging them is the safe choice, not always the best one.** The ensemble beats both components in 13 of 21 months (in November 2025 by only 0.001 percentage points, a tie in the rounded tables), and in the backtest Chronos-2 alone is slightly better overall. What the ensemble adds is robustness: the two models rarely fail in the same month.
 
-![MAPE by situation, main test period](reports/figures/03_mape_by_segment.png)
+![MAPE by situation, main test period](project/reports/figures/03_mape_by_segment.png)
 
 | MAPE [%], main test period | Official | LightGBM | Chronos-2 | Ensemble |
 |---|---|---|---|---|
@@ -129,7 +129,7 @@ Removing solar features hurts exactly where the PV hypothesis predicts. But even
 
 The official forecast's errors are not random: they drift in one direction for weeks, e.g. +2 GW on average in April and May. Such persistent bias can be removed with a few lines of code, so beating the *raw* official forecast partly means beating a fixable bias.
 
-The correction subtracts a share `alpha` of the forecast's mean error over the last `window_days` days, per hour of the day, using only errors known at forecast time (up to day D-2). The parameters are chosen on the validation periods, separately for every forecast, and then frozen ([`experiments.py`](src/loadfc/experiments.py), with its own leakage test).
+The correction subtracts a share `alpha` of the forecast's mean error over the last `window_days` days, per hour of the day, using only errors known at forecast time (up to day D-2). The parameters are chosen on the validation periods, separately for every forecast, and then frozen ([`experiments.py`](project/src/loadfc/experiments.py), with its own leakage test).
 
 | MAPE | Main | Backtest |
 |---|---|---|
@@ -145,9 +145,9 @@ The correction subtracts a share `alpha` of the forecast's mean error over the l
 
 ## Fresher data: the morning of day D-1
 
-The main pipeline only uses load up to the end of D-2. An upper-bound experiment shows that this is where the remaining headroom is ([`EXPERIMENTS.md`](reports/EXPERIMENTS.md), section 1): giving LightGBM the *observed* weather instead of the forecast barely changes its validation error, while giving it the *whole* of day D-1 lowers it by 11 to 15 %. The whole of D-1 is not available in time, but part of it is.
+The main pipeline only uses load up to the end of D-2. An upper-bound experiment shows that this is where the remaining headroom is ([`EXPERIMENTS.md`](project/reports/EXPERIMENTS.md), section 1): giving LightGBM the *observed* weather instead of the forecast barely changes its validation error, while giving it the *whole* of day D-1 lowers it by 11 to 15 %. The whole of D-1 is not available in time, but part of it is.
 
-**Assumption.** The forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and long before the official forecast (18:00). SMARD publishes actual load with about 1 hour of delay (measured once, on 2026-09-24), so with a 2-hour safety margin the load from 00:00 to 07:59 on D-1 counts as known. LightGBM gets five features from that window ([`features.py`](src/loadfc/features.py), `add_morning_load`); Chronos-2 simply reads its context up to 08:00. A leakage test checks that nothing after 08:00 is used.
+**Assumption.** The forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and long before the official forecast (18:00). SMARD publishes actual load with about 1 hour of delay (measured once, on 2026-09-24), so with a 2-hour safety margin the load from 00:00 to 07:59 on D-1 counts as known. LightGBM gets five features from that window ([`features.py`](project/src/loadfc/features.py), `add_morning_load`); Chronos-2 simply reads its context up to 08:00. A leakage test checks that nothing after 08:00 is used.
 
 **Decision rule, fixed in advance:** adopt only if the validation error improves in both periods for both models. It did:
 
@@ -166,7 +166,7 @@ The main pipeline only uses load up to the end of D-2. An upper-bound experiment
 | vs ensemble up to D-2 | p = 0.15 | p = 0.06 |
 | vs corrected official forecast | 23 % lower, p < 0.001, 12 of 12 months | 15 % lower, p = 0.002, 8 of 9 months |
 
-The gain on the test periods is smaller than on validation and not significant on its own. Its value is that it makes the advantage over the stronger benchmark significant in both periods. Most of the main-period gain comes from the Christmas period, probably because the fresher context shows Chronos-2 that the holiday lull has already begun: its Christmas error falls from 7.2 % to 4.7 %, and the ensemble's from 4.7 % to 3.9 %. Segment table: [`EXPERIMENTS.md`](reports/EXPERIMENTS.md), section 3.
+The gain on the test periods is smaller than on validation and not significant on its own. Its value is that it makes the advantage over the stronger benchmark significant in both periods. Most of the main-period gain comes from the Christmas period, probably because the fresher context shows Chronos-2 that the holiday lull has already begun: its Christmas error falls from 7.2 % to 4.7 %, and the ensemble's from 4.7 % to 3.9 %. Segment table: [`EXPERIMENTS.md`](project/reports/EXPERIMENTS.md), section 3.
 
 The headline numbers of this README remain the conservative D-2 version, because the morning variant depends on a publication delay that was measured only once.
 
@@ -174,7 +174,7 @@ The headline numbers of this README remain the conservative D-2 version, because
 
 ## Fine-tuning Chronos-2: helps with enough history, not yet adopted
 
-Chronos-2 can be fine-tuned on German load with the library's `fit` method (full or LoRA). Four configurations were tried, each fine-tuned on data before the validation period and scored with the usual day-ahead procedure ([`reports/FINETUNE.md`](reports/FINETUNE.md)).
+Chronos-2 can be fine-tuned on German load with the library's `fit` method (full or LoRA). Four configurations were tried, each fine-tuned on data before the validation period and scored with the usual day-ahead procedure ([`project/reports/FINETUNE.md`](project/reports/FINETUNE.md)).
 
 **Decision rule, fixed in advance:** adopt only if the best fine-tuned model beats zero-shot Chronos-2 on the validation period of both windows. **It did not.**
 
@@ -194,7 +194,7 @@ Going forward, with close to three years of history, fine-tuning is likely to pa
 
 ## An idea that did not work: PV and battery capacity features
 
-Installed PV grew from 85 to 128 GWp and home and grid batteries from 13 to 32 GWh between January 2024 and mid-2026 (Energy-Charts, Fraunhofer ISE). The idea: give the models physics-motivated features, installed capacity times forecast radiation and its change against last week, so they know that the same sunshine removes more grid load every year ([`reports/PV.md`](reports/PV.md)).
+Installed PV grew from 85 to 128 GWp and home and grid batteries from 13 to 32 GWh between January 2024 and mid-2026 (Energy-Charts, Fraunhofer ISE). The idea: give the models physics-motivated features, installed capacity times forecast radiation and its change against last week, so they know that the same sunshine removes more grid load every year ([`project/reports/PV.md`](project/reports/PV.md)).
 
 It failed the pre-registered rule, and the test periods agree: the main-period ensemble got significantly worse (2.70 % → 2.83 %, p < 0.001). The features did help exactly where intended, on sunny weekend and holiday middays (LightGBM 3.23 % → 2.90 %), but hurt elsewhere, most at Christmas (3.43 % → 4.22 %). The likely reason: installed capacity rises almost every month, so to a tree model it acts as a disguised date and lets it memorise periods instead of learning physics. A variant with only the trend-free change features would test this, but it has not been run.
 
@@ -204,14 +204,14 @@ A diagnostic in the same report also contradicts an earlier assumption of this p
 
 ## Probabilistic forecasts: honest intervals
 
-A balance responsible party or trader needs more than one number: how wide should the safety margin be? The project forecasts seven quantiles (P5 to P95) and scores them with the **mean pinball loss**, which rewards intervals that are both narrow and honest ([`reports/PROBABILISTIC.md`](reports/PROBABILISTIC.md)).
+A balance responsible party or trader needs more than one number: how wide should the safety margin be? The project forecasts seven quantiles (P5 to P95) and scores them with the **mean pinball loss**, which rewards intervals that are both narrow and honest ([`project/reports/PROBABILISTIC.md`](project/reports/PROBABILISTIC.md)).
 
 - **Conformal intervals**: a point forecast plus rolling empirical quantiles of its own recent errors, per hour of the day, using only errors known at forecast time (up to D-2).
 - **Chronos-2** outputs quantiles natively.
 - **Benchmark**: the official forecast with the same conformal intervals, its look-back window also tuned on validation.
 - Look-back windows (14, 28 or 42 days) and the choice of method are made on validation. Both periods chose the **average of LightGBM + conformal and Chronos-2**.
 
-![Probabilistic forecast, week of 20 April 2026](reports/figures/08_probabilistic_week.png)
+![Probabilistic forecast, week of 20 April 2026](project/reports/figures/08_probabilistic_week.png)
 
 | | Main | Backtest |
 |---|---|---|
@@ -222,18 +222,19 @@ A balance responsible party or trader needs more than one number: how wide shoul
 
 - **In the main period the intervals are both better and almost perfectly calibrated**: 80.1 % of actual values fall inside the nominal 80 % interval, 90.0 % inside the nominal 90 % one.
 - **In the backtest the gain is small and not significant**, the familiar pattern: LightGBM lacks history there. Chronos-2 alone would have been better (15 % lower loss), but on validation it was nearly tied with the average (671 vs 664 MW) and lost narrowly.
-- **Intervals built from recent errors alone are too narrow.** All conformal variants, including the benchmark, cover only 67 to 83 % where 80 or 90 % is promised: a few weeks of errors do not anticipate a regime change such as a cold snap or the Christmas lull. Chronos-2's model-based intervals are close to nominal, and averaging the two yields well-calibrated intervals.
+- **Intervals built from recent errors alone are too narrow.** All conformal variants, including the benchmark, cover only 66 to 83 % where 80 or 90 % is promised: a few weeks of errors do not anticipate a regime change such as a cold snap or the Christmas lull. Chronos-2's model-based intervals are close to nominal, and averaging the two yields well-calibrated intervals.
 
 ---
 
 ## Live test: forecasts published before the outcome
 
-Backtests, however careful, are looked at repeatedly. The final test is prospective: every morning `python -m loadfc live` forecasts the next day before 12:00 (day-ahead gate closure, and hours before the official forecast appears), writes the forecast to [`live/forecasts/`](live/forecasts), and `tools/run-live.ps1` commits and pushes it. GitHub's commit timestamps show that each forecast existed before the outcome was known.
+Backtests, however careful, are looked at repeatedly. The final test is prospective: every morning `python -m loadfc live` forecasts the next day before 12:00 (day-ahead gate closure, and hours before the official forecast appears), writes the forecast to [`project/live/forecasts/`](project/live/forecasts), and [`tools/run-live.ps1`](tools/run-live.ps1) commits and pushes it. Commit dates are set by the committing computer, but GitHub records the time of every push itself, in this repository's [activity log](https://github.com/hfthefeitong-dev/germany-load-forecast/activity), so the log shows that each forecast pushed here existed before the outcome was known.
 
-- **Pre-registered.** Hypotheses, metrics and the evaluation date are fixed in [`live/PREREGISTRATION.md`](live/PREREGISTRATION.md), all settings in [`live/settings.json`](live/settings.json), both committed before the first live day.
+- **Provenance.** This repository has been public since PUBLICATION_DATE. Before that, from 2026-10-01, the forecasts were pushed daily to a private development repository that also holds personal notes; this repository is derived from it with the notes removed ([`tools/publish-public.ps1`](tools/publish-public.ps1)). Commit messages and dates are unchanged, but commit hashes differ, so the `code_commit` in each manifest refers to the private repository. Its push log is available on request.
+- **Pre-registered.** Hypotheses, metrics and the evaluation date are fixed in [`project/live/PREREGISTRATION.md`](project/live/PREREGISTRATION.md), all settings in [`project/live/settings.json`](project/live/settings.json), both committed before the first live day.
 - **Nothing is backfilled.** A manifest per day records when the file was written and what data was available; late or missing days are excluded.
 - **It settles the open questions.** Whether the morning load (H2) and fine-tuning (H3) help is decided here, not in the backtest.
-- Interim scores: [`reports/LIVE.md`](reports/LIVE.md). The pre-registered evaluation follows after at least 60 on-time days, not before December 2026.
+- Interim scores: [`project/reports/LIVE.md`](project/reports/LIVE.md). The pre-registered evaluation follows after at least 60 on-time days, not before December 2026.
 
 ---
 
@@ -281,9 +282,10 @@ This is a thought experiment, not a market simulation: if every BRP forecast bet
 
 ## Reproduce
 
-Requires Python 3.12 and, for Chronos-2, a CUDA GPU (tested on an RTX 4090 under WSL2). Exact package versions are pinned in [`requirements-lock.txt`](requirements-lock.txt).
+Requires Python 3.12 and, for Chronos-2, a CUDA GPU (tested on an RTX 4090 under WSL2). Exact package versions are pinned in [`project/requirements-lock.txt`](project/requirements-lock.txt). The package lives in `project/`; run everything from there:
 
 ```bash
+cd project
 pip install -r requirements-lock.txt
 pip install -e . --no-deps
 python -m pytest                 # leakage, calendar and bias-correction tests
@@ -296,24 +298,28 @@ python -m loadfc probabilistic   # ~10 min: reports/PROBABILISTIC.md
 python -m loadfc live --dry-run  # one live forecast, without storing it
 ```
 
-`all` runs `run`, `ablation`, `chronos` and `summary` in order. Only `summary` and `experiments` write to `reports/`, so the steps never overwrite each other.
+`all` runs `run`, `ablation`, `chronos` and `summary` in order. Each reporting step writes its own file in `reports/` (`summary` writes `RESULTS.md` and `results.json`), so the steps never overwrite each other.
 
 ```
-src/loadfc/
-  config.py       paths, evaluation windows, federal states
-  smard.py        load, official forecast, day-ahead price
-  weather.py      48 h-ahead weather forecasts, aggregation to national features
-  rebap.py        imbalance price
-  calendar_de.py  holiday share, bridge days, Christmas
-  features.py     feature table, the fairness rule, morning-load features
-  models.py       baselines, LightGBM with monthly retraining
-  foundation.py   Chronos-2 zero-shot
-  evaluate.py     metrics, segments, Diebold-Mariano test
-  cost.py         imbalance cost
-  experiments.py  upper bound, bias correction, morning load, fine-tuning, PV capacity
-  capacity.py     installed PV and battery capacity (Energy-Charts)
-  live.py         daily live forecasts and their evaluation
-tests/            leakage, calendar, bias-correction and cutoff tests
-reports/          RESULTS.md, EXPERIMENTS.md, results.json, figures
-live/             pre-registration, frozen settings, daily forecasts
+project/
+  src/loadfc/
+    config.py       paths, evaluation windows, federal states
+    smard.py        load, official forecast, day-ahead price
+    weather.py      48 h-ahead weather forecasts, aggregation to national features
+    rebap.py        imbalance price
+    calendar_de.py  holiday share, bridge days, Christmas
+    features.py     feature table, the fairness rule, morning-load features
+    models.py       baselines, LightGBM with monthly retraining
+    foundation.py   Chronos-2 zero-shot
+    evaluate.py     metrics, segments, Diebold-Mariano test
+    cost.py         imbalance cost
+    experiments.py  upper bound, bias correction, morning load, fine-tuning, PV capacity
+    capacity.py     installed PV and battery capacity (Energy-Charts)
+    live.py         daily live forecasts and their evaluation
+  tests/            leakage, calendar, bias-correction and cutoff tests
+  reports/          RESULTS.md, EXPERIMENTS.md, results.json, figures
+  live/             pre-registration, frozen settings, daily forecasts
+tools/
+  run-live.ps1        daily live run: forecast, commit, push
+  publish-public.ps1  derives this public repository from the private one
 ```

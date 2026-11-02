@@ -1,4 +1,4 @@
-# 数据与模型产物
+# Data and model artifacts
 data/
 datasets/
 checkpoints/
@@ -28,9 +28,12 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# 编辑器 / 系统
+# Editor / OS
 .vscode/*
 !.vscode/settings.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local Claude Code settings and worktrees
+.claude/
