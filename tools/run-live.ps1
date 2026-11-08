@@ -1,5 +1,6 @@
 # Daily live forecast: issue tomorrow's forecast, update the interim report,
-# commit and push. Meant to run once a day around 09:50 local time.
+# commit and push, then update the public repository (tools/publish-public.ps1).
+# Scheduled at 11:16 local time, with a backup run at 11:41.
 #
 # Manual run:
 #   powershell -ExecutionPolicy Bypass -File E:\Coding\energy-ml-lab\tools\run-live.ps1
@@ -30,3 +31,8 @@ git -C $repo add project/live project/reports/LIVE.md 2>&1 | ForEach-Object { "$
 git -C $repo commit -m "live: forecast for $target" 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
 git -C $repo push 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
 Log "git push finished with exit code $LASTEXITCODE"
+if ($LASTEXITCODE -ne 0) { Log "private push failed: public repository not updated"; exit 1 }
+
+# The public repository is derived from the commits just pushed, so it never holds a forecast the private push log lacks.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo "tools\publish-public.ps1") -Push 2>&1 | ForEach-Object { "$_" } | Out-File -Append -Encoding utf8 $log
+Log "publish-public finished with exit code $LASTEXITCODE"

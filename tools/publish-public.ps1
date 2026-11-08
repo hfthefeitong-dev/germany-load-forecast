@@ -60,6 +60,8 @@ $count = git -C $Mirror rev-list --count public
 if (-not $Push) { exit 0 }
 git -C $Mirror remote get-url public 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { "publish-public: no remote 'public' in $Mirror, nothing pushed"; exit 0 }
+$placeholder = git -C $Mirror show public:README.md | Select-String -Quiet -SimpleMatch "PUBLICATION_DATE"
+if ($placeholder) { Fail "README.md still says PUBLICATION_DATE: fill in the date before the first push" }
 git -C $Mirror push public public:main 2>&1 | ForEach-Object { "$_" }
 if ($LASTEXITCODE -ne 0) { Fail "push failed (a rejected push means the histories diverged: never force it)" }
 "publish-public: pushed $head"
