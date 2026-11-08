@@ -2,9 +2,12 @@
 #
 # The public history is this repository's history with the personal notes left
 # out: only the paths in $keep survive, commits that touched nothing else are
-# dropped, and commit messages and dates are unchanged. The rewrite is
-# deterministic, so on a longer private history it only appends commits and the
-# public branch always fast-forwards. Never force-push the result.
+# dropped, and commit messages and dates are unchanged. The old local author
+# e-mail is mapped to the GitHub account's noreply address, so GitHub links the
+# commits to the account. The rewrite is deterministic, so on a longer private
+# history it only appends commits and the public branch always fast-forwards.
+# Never force-push the result. (The one force push, on 2026-11-08, replaced the
+# first publication, pushed minutes earlier, when the e-mail mapping was added.)
 #
 # Preview, without pushing (writes only to the mirror repository):
 #   powershell -ExecutionPolicy Bypass -File E:\Coding\energy-ml-lab\tools\publish-public.ps1
@@ -40,7 +43,10 @@ if ($LASTEXITCODE -ne 0) { Fail "update-ref failed" }
 
 $env:FILTER_BRANCH_SQUELCH_WARNING = "1"
 $filter = "git rm -r -q --cached --ignore-unmatch -- . && git reset -q `$GIT_COMMIT -- $keep && git rm -r -q --cached --ignore-unmatch -- $drop"
-git -C $Mirror filter-branch -f --prune-empty --index-filter $filter -- public 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -notmatch "^Rewrite " }
+# No double quotes in this filter: PowerShell 5.1 does not escape them for native commands.
+$account = "246066597+hfthefeitong-dev@users.noreply.github.com"
+$envFilter = "if test `$GIT_AUTHOR_EMAIL = tony@local; then GIT_AUTHOR_EMAIL=$account; fi; if test `$GIT_COMMITTER_EMAIL = tony@local; then GIT_COMMITTER_EMAIL=$account; fi"
+git -C $Mirror filter-branch -f --prune-empty --env-filter $envFilter --index-filter $filter -- public 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -notmatch "^Rewrite " }
 if ($LASTEXITCODE -ne 0) { Fail "filter-branch failed" }
 # Only the filtered branch may stay; the unfiltered refs would carry the notes along with any push.
 git -C $Mirror update-ref -d refs/original/refs/heads/public
