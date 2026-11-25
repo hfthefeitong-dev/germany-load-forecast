@@ -4,7 +4,7 @@ Day-ahead forecasts of electricity demand for Germany, benchmarked against the o
 
 - An ensemble of gradient boosting and a zero-shot foundation model is **about 30 % more accurate than the official forecast as published and beats it in all 21 test months**, across two separate out-of-sample periods.
 - Against a **stronger benchmark**, the official forecast after a simple bias correction that anyone could apply, the margin is **22 % in the main period but only 8 % and not significant in the backtest** (with the same correction applied to the ensemble).
-- Issuing the forecast at 10:00 on the day before and using **that morning's published load**, still well before the official forecast appears, raises the margin over the stronger benchmark to **23 % and 15 %, significant in both periods**.
+- Issuing the forecast at 10:00 on the day before and using **that morning's published load**, the same cutoff as the official forecast's publication deadline, raises the margin over the stronger benchmark to **23 % and 15 %, significant in both periods**.
 - Forecast errors are translated into **imbalance costs in euros** using the German imbalance price reBAP.
 - **Probabilistic forecasts** give well-calibrated 80 % and 90 % intervals; in the main period their pinball loss is 23 % lower than that of the official forecast with the same kind of intervals.
 
@@ -36,7 +36,7 @@ The largest official errors of the year were on **Sunday 26 April 2026** and **L
 
 ## Fairness: the comparison is only meaningful if the model cannot see the future
 
-The official forecast for day D is published on day D-1 (by 18:00, per [SMARD](https://www.smard.de/page/en/wiki-article/5884/206318/forecast-data)). The main pipeline deliberately uses **less** than that:
+The official forecast for day D must be published on day D-1 no later than two hours before the day-ahead gate closure, i.e. by 10:00 ([Regulation (EU) No 543/2013](https://eur-lex.europa.eu/eli/reg/2013/543/oj), Art. 6(2)(b)); the 18:00 deadline on [SMARD's forecast page](https://www.smard.de/page/en/wiki-article/5884/206318/forecast-data) applies to the generation forecasts. The TSOs must also update the load forecast when significant changes occur, and the archived values do not show which version they are; a later version would give the official forecast more information, not less. The main pipeline deliberately uses **less** than that:
 
 | Information | Used for day D | Why it is fair |
 |---|---|---|
@@ -147,7 +147,7 @@ The correction subtracts a share `alpha` of the forecast's mean error over the l
 
 The main pipeline only uses load up to the end of D-2. An upper-bound experiment shows that this is where the remaining headroom is ([`EXPERIMENTS.md`](project/reports/EXPERIMENTS.md), section 1): giving LightGBM the *observed* weather instead of the forecast barely changes its validation error, while giving it the *whole* of day D-1 lowers it by 11 to 15 %. The whole of D-1 is not available in time, but part of it is.
 
-**Assumption.** The forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and long before the official forecast (18:00). SMARD publishes actual load with about 1 hour of delay (measured once, on 2026-09-24), so with a 2-hour safety margin the load from 00:00 to 07:59 on D-1 counts as known. LightGBM gets five features from that window ([`features.py`](project/src/loadfc/features.py), `add_morning_load`); Chronos-2 simply reads its context up to 08:00. A leakage test checks that nothing after 08:00 is used.
+**Assumption.** The forecast is issued on D-1 at 10:00, before the day-ahead gate closure (12:00) and at the deadline by which the official forecast must be published (10:00). This variant therefore has roughly the same information cutoff as the official forecast, not less. SMARD publishes actual load with about 1 hour of delay (measured once, on 2026-09-24), so with a 2-hour safety margin the load from 00:00 to 07:59 on D-1 counts as known. LightGBM gets five features from that window ([`features.py`](project/src/loadfc/features.py), `add_morning_load`); Chronos-2 simply reads its context up to 08:00. A leakage test checks that nothing after 08:00 is used.
 
 **Decision rule, fixed in advance:** adopt only if the validation error improves in both periods for both models. It did:
 
@@ -228,7 +228,7 @@ A balance responsible party or trader needs more than one number: how wide shoul
 
 ## Live test: forecasts published before the outcome
 
-Backtests, however careful, are looked at repeatedly. The final test is prospective: every morning `python -m loadfc live` forecasts the next day before 12:00 (day-ahead gate closure, and hours before the official forecast appears), writes the forecast to [`project/live/forecasts/`](project/live/forecasts), and [`tools/run-live.ps1`](tools/run-live.ps1) commits and pushes it. Commit dates are set by the committing computer, but GitHub records the time of every push itself, in this repository's [activity log](https://github.com/hfthefeitong-dev/germany-load-forecast/activity), so the log shows that each forecast pushed here existed before the outcome was known.
+Backtests, however careful, are looked at repeatedly. The final test is prospective: every morning `python -m loadfc live` forecasts the next day before 12:00 (day-ahead gate closure), writes the forecast to [`project/live/forecasts/`](project/live/forecasts), and [`tools/run-live.ps1`](tools/run-live.ps1) commits and pushes it. Commit dates are set by the committing computer, but GitHub records the time of every push itself, in this repository's [activity log](https://github.com/hfthefeitong-dev/germany-load-forecast/activity), so the log shows that each forecast pushed here existed before the outcome was known.
 
 - **Provenance.** This repository has been public since 2026-11-08. Before that, the forecasts were pushed to a private development repository (the first on 2026-09-25, daily from 2026-10-01) that also holds personal notes; this repository is derived from it with the notes removed ([`tools/publish-public.ps1`](tools/publish-public.ps1)). Commit messages and dates are unchanged (only the author e-mail is mapped to this GitHub account), but commit hashes differ, so the `code_commit` in each manifest refers to the private repository. Its push log is available on request.
 - **Pre-registered.** Hypotheses, metrics and the evaluation date are fixed in [`project/live/PREREGISTRATION.md`](project/live/PREREGISTRATION.md), all settings in [`project/live/settings.json`](project/live/settings.json), both committed before the first live day.

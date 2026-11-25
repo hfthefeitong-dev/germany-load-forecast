@@ -10,7 +10,10 @@ Series used here
     4169  day-ahead wholesale price, bidding zone DE-LU    (EUR/MWh)
 
 The official forecast is produced by the four transmission system
-operators and published on SMARD by 18:00 on the day before delivery.
+operators. Regulation (EU) 543/2013, Art. 6(2)(b), requires it by 10:00
+on the day before delivery (two hours before day-ahead gate closure) and
+an update when significant changes occur; SMARD does not show which
+version it archives. (SMARD's 18:00 deadline is for generation forecasts.)
 """
 
 import time
