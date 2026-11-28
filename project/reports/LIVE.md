@@ -1,27 +1,27 @@
 # Live forecasts
 
-On-time live forecasts with known actuals: 52 days. The pre-registered evaluation
+On-time live forecasts with known actuals: 53 days. The pre-registered evaluation
 (live/PREREGISTRATION.md) happens after at least 60 days.
 
 ## Point forecasts
 
 | model               |   hours |   MAPE % |
 |:--------------------|--------:|---------:|
-| official            |    1235 |     3.57 |
-| official+bc         |    1235 |     3.07 |
-| lgbm                |    1235 |     2.64 |
-| chronos             |    1235 |     2.58 |
-| ensemble            |    1235 |     2.41 |
-| lgbm_morning        |    1187 |     2.14 |
-| chronos_morning     |    1187 |     2.32 |
-| ensemble_morning    |    1187 |     2.07 |
-| chronos_ft          |    1235 |     2.25 |
-| ensemble_ft         |    1235 |     2.28 |
-| ensemble_ft_morning |    1187 |     1.99 |
+| official            |    1259 |     3.58 |
+| official+bc         |    1259 |     3.05 |
+| lgbm                |    1259 |     2.62 |
+| chronos             |    1259 |     2.56 |
+| ensemble            |    1259 |     2.39 |
+| lgbm_morning        |    1211 |     2.14 |
+| chronos_morning     |    1211 |     2.31 |
+| ensemble_morning    |    1211 |     2.06 |
+| chronos_ft          |    1259 |     2.23 |
+| ensemble_ft         |    1259 |     2.26 |
+| ensemble_ft_morning |    1211 |     1.98 |
 
 ## Probabilistic forecasts
 
 | method                               |   mean pinball MW |   coverage 80 % (P10-P90) |   coverage 90 % (P5-P95) |   width 80 % MW |   median MAPE % |   hours |
 |:-------------------------------------|------------------:|--------------------------:|-------------------------:|----------------:|----------------:|--------:|
-| avg(LightGBM + conformal, Chronos-2) |            388.76 |                     79.19 |                    86.88 |         4131.06 |            2.36 |    1235 |
-| official + conformal (benchmark)     |            505.43 |                     70.85 |                    80.89 |         4315.34 |            2.99 |    1235 |
+| avg(LightGBM + conformal, Chronos-2) |            387.58 |                     79.43 |                    86.97 |         4133.56 |            2.34 |    1259 |
+| official + conformal (benchmark)     |            502.47 |                     71.09 |                    81.02 |         4324.56 |            2.98 |    1259 |
